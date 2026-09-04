@@ -1,0 +1,280 @@
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Request, Body
+from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
+import httpx
+import jwt
+from datetime import datetime, timedelta
+
+from app.config import settings
+from app.database import get_db
+from app.models import User, MetaPageConnection
+from app.services.auth import get_current_user, SECRET_KEY, ALGORITHM
+
+router = APIRouter(prefix="/integrations/facebook", tags=["facebook"])
+
+FB_API_BASE = "https://graph.facebook.com/v20.0"
+
+def create_fb_session_token(user_access_token: str) -> str:
+    expire = datetime.utcnow() + timedelta(minutes=60)
+    to_encode = {"exp": expire, "user_access_token": user_access_token}
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_fb_session_token(token: str) -> str:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("user_access_token")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired FB session token")
+
+@router.get("/auth-url")
+def get_auth_url(request: Request):
+    # Dynamically determine callback URL based on the request's origin.
+    # This allows it to work seamlessly whether accessed via localhost or a WiFi IP (e.g. 192.168.x.x)
+    base_url = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base_url}/integrations/facebook/callback"
+    
+    if settings.meta_app_id == "local_dev_meta_app_id":
+        # Mock local dev flow - redirect straight to our callback with a dummy code
+        url = f"{redirect_uri}?code=mock_oauth_code"
+    else:
+        url = (
+            f"https://www.facebook.com/v20.0/dialog/oauth?"
+            f"client_id={settings.meta_app_id}"
+            f"&redirect_uri={redirect_uri}"
+            f"&scope=pages_show_list,pages_manage_metadata,leads_retrieval"
+            f"&response_type=code"
+        )
+    return {"url": url, "redirect_uri": redirect_uri}
+
+@router.get("/callback", response_class=HTMLResponse)
+def oauth_callback(code: Optional[str] = None, error: Optional[str] = None, error_description: Optional[str] = None):
+    """
+    This endpoint is hit by Facebook. We render a script that passes the code
+    back to our frontend SPA popup opener, then closes the window.
+    """
+    if error:
+        return f"""
+        <html><body>
+        <script>
+            window.opener.postMessage({{ type: 'FB_OAUTH_ERROR', error: '{error_description}' }}, '*');
+            window.close();
+        </script>
+        </body></html>
+        """
+    if code:
+        return f"""
+        <html><body>
+        <script>
+            window.opener.postMessage({{ type: 'FB_OAUTH_SUCCESS', code: '{code}' }}, '*');
+            window.close();
+        </script>
+        </body></html>
+        """
+    return "Invalid callback"
+
+@router.post("/exchange")
+async def exchange_code(
+    code: str = Body(...),
+    redirect_uri: str = Body(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Exchanges the OAuth code for a user access token and returns a secure session token."""
+    url = f"{FB_API_BASE}/oauth/access_token"
+    params = {
+        "client_id": settings.meta_app_id,
+        "client_secret": settings.meta_app_secret,
+        "redirect_uri": redirect_uri,
+        "code": code
+    }
+    
+    if settings.meta_app_id == "local_dev_meta_app_id":
+        return {"fb_session_token": create_fb_session_token("mock_user_token")}
+        
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params)
+        data = resp.json()
+        if "error" in data:
+            raise HTTPException(status_code=400, detail=data["error"].get("message", "OAuth exchange failed"))
+        
+        user_access_token = data.get("access_token")
+        if not user_access_token:
+            raise HTTPException(status_code=400, detail="No access token returned")
+        
+        # We encrypt the FB token in a JWT so the frontend can hold it safely for the next steps
+        session_token = create_fb_session_token(user_access_token)
+        return {"fb_session_token": session_token}
+
+@router.get("/pages")
+async def get_pages(
+    fb_session_token: str,
+    current_user: User = Depends(get_current_user)
+):
+    user_access_token = decode_fb_session_token(fb_session_token)
+    
+    if settings.meta_app_id == "local_dev_meta_app_id":
+        return {"pages": [{"id": "page_1", "name": "ABC Pharmacy"}, {"id": "page_2", "name": "XYZ Pharmacy"}]}
+        
+    url = f"{FB_API_BASE}/me/accounts"
+    params = {"access_token": user_access_token, "fields": "id,name,access_token"}
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params)
+        data = resp.json()
+        if "error" in data:
+            raise HTTPException(status_code=400, detail=data["error"].get("message", "Failed to fetch pages"))
+        
+        pages = [{"id": p["id"], "name": p["name"]} for p in data.get("data", [])]
+        return {"pages": pages}
+
+@router.get("/pages/{page_id}/forms")
+async def get_page_forms(
+    page_id: str,
+    fb_session_token: str,
+    current_user: User = Depends(get_current_user)
+):
+    user_access_token = decode_fb_session_token(fb_session_token)
+    
+    if settings.meta_app_id == "local_dev_meta_app_id":
+        return {"forms": [{"id": "form_1", "name": "Medicine Campaign"}, {"id": "form_2", "name": "Home Delivery Campaign"}]}
+    
+    # First, get the page access token
+    url_accounts = f"{FB_API_BASE}/me/accounts"
+    params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
+    
+    page_access_token = None
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url_accounts, params=params_acc)
+        data = resp.json()
+        for p in data.get("data", []):
+            if p["id"] == page_id:
+                page_access_token = p["access_token"]
+                break
+                
+    if not page_access_token:
+        raise HTTPException(status_code=403, detail="Could not retrieve Page Access Token")
+        
+    # Now get forms
+    url_forms = f"{FB_API_BASE}/{page_id}/leadgen_forms"
+    params_forms = {"access_token": page_access_token, "fields": "id,name,status"}
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url_forms, params=params_forms)
+        data = resp.json()
+        if "error" in data:
+            raise HTTPException(status_code=400, detail=data["error"].get("message", "Failed to fetch forms"))
+        
+        forms = [{"id": f["id"], "name": f["name"], "status": f.get("status")} for f in data.get("data", [])]
+        return {"forms": forms}
+
+@router.post("/connect")
+async def connect_page(
+    fb_session_token: str = Body(...),
+    page_id: str = Body(...),
+    page_name: str = Body(...),
+    forms: List[str] = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_access_token = decode_fb_session_token(fb_session_token)
+    
+    if settings.meta_app_id == "local_dev_meta_app_id":
+        page_access_token = "mock_page_token"
+    else:
+        # 1. Get Page Access Token
+        url_accounts = f"{FB_API_BASE}/me/accounts"
+        params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
+        
+        page_access_token = None
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url_accounts, params=params_acc)
+            data = resp.json()
+            for p in data.get("data", []):
+                if p["id"] == page_id:
+                    page_access_token = p["access_token"]
+                    break
+                
+            if not page_access_token:
+                raise HTTPException(status_code=403, detail="Could not retrieve Page Access Token")
+                    
+            # 2. Subscribe webhook
+            url_sub = f"{FB_API_BASE}/{page_id}/subscribed_apps"
+            params_sub = {
+                "access_token": page_access_token,
+                "subscribed_fields": "leadgen"
+            }
+            resp_sub = await client.post(url_sub, params=params_sub)
+            sub_data = resp_sub.json()
+            if "error" in sub_data:
+                # Log error but don't fail completely
+                pass
+            
+    # 3. Save to DB
+    conn = db.query(MetaPageConnection).filter(
+        MetaPageConnection.org_id == current_user.org_id,
+        MetaPageConnection.page_id == page_id
+    ).first()
+    
+    if conn:
+        conn.page_name = page_name
+        conn.access_token = page_access_token
+        conn.connected_forms = forms
+        conn.status = "active"
+    else:
+        conn = MetaPageConnection(
+            org_id=current_user.org_id,
+            user_id=current_user.id,
+            page_id=page_id,
+            page_name=page_name,
+            access_token=page_access_token,
+            connected_forms=forms,
+            status="active"
+        )
+        db.add(conn)
+        
+    db.commit()
+    db.refresh(conn)
+    
+    return {"status": "success", "id": conn.id}
+
+@router.get("/connections")
+def list_connections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    conns = db.query(MetaPageConnection).filter(
+        MetaPageConnection.org_id == current_user.org_id
+    ).order_by(MetaPageConnection.created_at.desc()).all()
+    
+    return [
+        {
+            "id": c.id,
+            "page_id": c.page_id,
+            "page_name": c.page_name,
+            "connected_forms": c.connected_forms,
+            "status": c.status,
+            "created_at": c.created_at
+        } for c in conns
+    ]
+
+@router.post("/connections/{conn_id}/disconnect")
+async def disconnect_page(
+    conn_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    conn = db.query(MetaPageConnection).filter(
+        MetaPageConnection.id == conn_id,
+        MetaPageConnection.org_id == current_user.org_id
+    ).first()
+    
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+        
+    if settings.meta_app_id != "local_dev_meta_app_id" and conn.access_token:
+        url_sub = f"{FB_API_BASE}/{conn.page_id}/subscribed_apps"
+        params = {"access_token": conn.access_token}
+        async with httpx.AsyncClient() as client:
+            await client.delete(url_sub, params=params)
+            
+    conn.status = "disconnected"
+    db.commit()
+    
+    return {"status": "disconnected"}

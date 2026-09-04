@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MetaCRM — Lead Management Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <!-- ═══════════════════════════════ SIDEBAR ════════════════════════════════ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-icon"><i data-lucide="layout-grid"></i></div>
+      <div class="brand-text">
+        <span class="brand-name">MetaCRM</span>
+        <span class="brand-tag">Lead Platform</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <p class="nav-section-label">Workspace</p>
+      <ul class="nav-list">
+        <li class="nav-item active" data-tab="tab-pipeline">
+          <i data-lucide="kanban"></i><span>Pipeline Board</span>
+        </li>
+        <li class="nav-item" data-tab="tab-table">
+          <i data-lucide="table-2"></i><span>All Leads</span>
+        </li>
+        <li class="nav-item" data-tab="tab-analytics">
+          <i data-lucide="bar-chart-3"></i><span>Analytics</span>
+        </li>
+      </ul>
+
+      <p class="nav-section-label">Management</p>
+      <ul class="nav-list">
+        <li class="nav-item admin-only" data-tab="tab-campaigns">
+          <i data-lucide="megaphone"></i><span>Campaigns</span>
+        </li>
+        <li class="nav-item admin-only" data-tab="tab-staff">
+          <i data-lucide="users"></i><span>Staff & Roles</span>
+        </li>
+        <li class="nav-item admin-only" data-tab="tab-connect">
+          <i data-lucide="plug"></i><span>Lead Sources</span>
+        </li>
+      </ul>
+
+      <p class="nav-section-label">Tools</p>
+      <ul class="nav-list">
+        <li class="nav-item" data-tab="tab-simulator">
+          <i data-lucide="zap"></i><span>Webhook Tester</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="connection-badge" id="connectionBadge">
+        <div class="badge-dot disconnected"></div>
+        <div class="badge-info">
+          <span class="badge-label">Meta Ads</span>
+          <span class="badge-status" id="connectionStatus">Not Connected</span>
+        </div>
+      </div>
+      <button class="sidebar-user" id="openAuthModalBtn">
+        <div class="user-avatar" id="userAvatarLetter">?</div>
+        <div class="user-info">
+          <span class="user-name" id="sidebarUserName">Sign In</span>
+          <span class="user-role" id="sidebarUserRole">—</span>
+        </div>
+        <i data-lucide="chevron-right" style="width:14px;opacity:.4;"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════ MAIN AREA ══════════════════════════════ -->
+  <div class="main-wrapper">
+
+    <!-- TOP HEADER -->
+    <header class="top-header">
+      <div class="header-left">
+        <button class="btn-icon" id="sidebarToggleBtn" style="display:none;">
+          <i data-lucide="menu"></i>
+        </button>
+        <div class="page-title">
+          <h1 id="pageTitleText">Pipeline Board</h1>
+          <span class="org-pill" id="headerOrgName">—</span>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <div class="search-wrap">
+          <i data-lucide="search"></i>
+          <input type="text" id="searchInput" placeholder="Search leads…">
+        </div>
+        <select class="hdr-select" id="campaignFilterSelect">
+          <option value="">All Campaigns</option>
+        </select>
+      </div>
+
+      <div class="header-right">
+        <button class="btn btn-ghost" id="exportBtn" title="Export to Excel">
+          <i data-lucide="download"></i><span>Export</span>
+        </button>
+        <button class="btn btn-primary" id="openSimulateModalBtn">
+          <i data-lucide="plus"></i><span>Simulate Lead</span>
+        </button>
+        <button class="btn-icon" id="themeToggleBtn" title="Toggle theme">
+          <i data-lucide="moon" id="themeIcon"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main class="content-body">
+
+      <!-- KPI METRICS -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-icon blue"><i data-lucide="users"></i></div>
+          <div class="metric-info">
+            <p>Total Leads</p>
+            <h2 id="statTotal">—</h2>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon green"><i data-lucide="sparkles"></i></div>
+          <div class="metric-info">
+            <p>New Today</p>
+            <h2 id="statNewToday">—</h2>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon purple"><i data-lucide="user-check"></i></div>
+          <div class="metric-info">
+            <p>Qualified</p>
+            <h2 id="statQualified">—</h2>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon cyan"><i data-lucide="trending-up"></i></div>
+          <div class="metric-info">
+            <p>Conversion Rate</p>
+            <h2 id="statConversionRate">—</h2>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TAB: PIPELINE BOARD ── -->
+      <div id="tab-pipeline" class="tab-pane active">
+        <div class="section-head">
+          <h2>Lead Pipeline</h2>
+          <span class="hint">Click a card to manage lead & send WhatsApp</span>
+        </div>
+        <div class="kanban-board">
+          <div class="kanban-col" data-status="new">
+            <div class="col-header"><span class="col-dot blue"></span>New<span class="col-count" id="count-new">0</span></div>
+            <div class="col-cards" id="container-new"></div>
+          </div>
+          <div class="kanban-col" data-status="contacted">
+            <div class="col-header"><span class="col-dot amber"></span>Contacted<span class="col-count" id="count-contacted">0</span></div>
+            <div class="col-cards" id="container-contacted"></div>
+          </div>
+          <div class="kanban-col" data-status="qualified">
+            <div class="col-header"><span class="col-dot purple"></span>Qualified<span class="col-count" id="count-qualified">0</span></div>
+            <div class="col-cards" id="container-qualified"></div>
+          </div>
+          <div class="kanban-col" data-status="converted">
+            <div class="col-header"><span class="col-dot green"></span>Converted<span class="col-count" id="count-converted">0</span></div>
+            <div class="col-cards" id="container-converted"></div>
+          </div>
+          <div class="kanban-col" data-status="lost">
+            <div class="col-header"><span class="col-dot red"></span>Lost<span class="col-count" id="count-lost">0</span></div>
+            <div class="col-cards" id="container-lost"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TAB: ALL LEADS TABLE ── -->
+      <div id="tab-table" class="tab-pane">
+        <div class="section-head" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <h2>All Leads</h2>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <div class="date-filter-group" style="display: flex; align-items: center; gap: 8px; background: var(--bg-sec); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);">
+              <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);"></i>
+              <input type="text" id="leadsDateFilter" class="form-control" placeholder="Select Date(s)" style="border: none; background: transparent; padding: 4px; font-size: 13px; color: var(--text-main); width: 180px;">
+            </div>
+            <button class="btn btn-secondary" id="btnPrintLeads">
+              <i data-lucide="printer"></i> Print List
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Lead</th><th>Contact</th><th>Campaign</th>
+                <th>Assigned To</th><th>Status</th><th>Received</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="leadsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: ANALYTICS ── -->
+      <div id="tab-analytics" class="tab-pane">
+        <div class="section-head" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <h2>Analytics</h2>
+          <div class="date-filter-group" style="display: flex; align-items: center; gap: 8px; background: var(--bg-sec); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);">
+            <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);"></i>
+            <input type="text" id="analyticsDateRange" class="form-control" placeholder="Select Date Range" style="border: none; background: transparent; padding: 4px; font-size: 13px; color: var(--text-main); width: 220px;">
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3>Lead Status Distribution</h3>
+            <div style="position: relative; height: 300px; width: 100%;">
+              <canvas id="statusChart"></canvas>
+            </div>
+          </div>
+          <div class="chart-card" style="grid-column: span 1;">
+            <h3>Leads Over Time</h3>
+            <div style="position: relative; height: 300px; width: 100%;">
+              <canvas id="campaignChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TAB: CAMPAIGNS ── -->
+      <div id="tab-campaigns" class="tab-pane">
+        <div class="section-head">
+          <h2>Campaign Management</h2>
+          <button class="btn btn-primary" id="openCreateCampaignBtn">
+            <i data-lucide="plus"></i> New Campaign
+          </button>
+        </div>
+        <div class="campaigns-grid" id="campaignsGrid">
+          <div class="empty-state"><i data-lucide="megaphone"></i><p>No campaigns yet. Create one to start assigning staff.</p></div>
+        </div>
+      </div>
+
+      <!-- ── TAB: STAFF & ROLES ── -->
+      <div id="tab-staff" class="tab-pane">
+        <div class="section-head">
+          <h2>Staff & Roles</h2>
+          <button class="btn btn-primary" id="openInviteStaffBtn">
+            <i data-lucide="user-plus"></i> Invite Staff
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Email</th><th>Role</th><th>Assigned Campaigns</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="staffTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TAB: LEAD SOURCES ── -->
+      <div id="tab-connect" class="tab-pane">
+        <div class="section-head">
+          <h2>Lead Sources</h2>
+        </div>
+        
+        <div class="integration-cards" id="integrationList">
+          <!-- Active connections will be injected here -->
+        </div>
+
+        <div class="connect-new-card">
+          <div class="connect-icon"><i data-lucide="facebook" style="color: #1877F2;"></i></div>
+          <div class="connect-info">
+            <h3>Facebook Lead Ads</h3>
+            <p>Automatically receive leads from your Facebook Lead Ads by connecting your Facebook Page.</p>
+          </div>
+          <button class="btn btn-primary" id="btnConnectFacebook">
+            <i data-lucide="plug"></i> Connect Facebook
+          </button>
+        </div>
+
+        <div class="connect-new-card" style="margin-top: 16px;">
+          <div class="connect-icon"><i data-lucide="file-spreadsheet" style="color: #0F9D58;"></i></div>
+          <div class="connect-info">
+            <h3>Google Sheets Sync</h3>
+            <p>Automatically push new leads into your Google Sheet in real-time.</p>
+          </div>
+          <button class="btn btn-primary" id="btnConnectGoogleSheets">
+            <i data-lucide="plug"></i> Connect Google Sheet
+          </button>
+        </div>
+      </div>
+
+      <!-- ── TAB: WEBHOOK TESTER ── -->
+      <div id="tab-simulator" class="tab-pane">
+        <div class="section-head"><h2>Meta Webhook Tester</h2></div>
+        <div class="simulator-layout">
+          <div class="chart-card">
+            <h3 style="margin-bottom:4px;">Simulate a Lead Ad Submission</h3>
+            <p class="hint" style="margin-bottom:20px;">Creates a fake Meta lead in your pipeline so you can test the full flow without real Facebook traffic.</p>
+            <form id="simulatorForm">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Full Name</label>
+                  <input type="text" class="form-control" id="simName" value="Alex Morgan" required>
+                </div>
+                <div class="form-group">
+                  <label>Email</label>
+                  <input type="email" class="form-control" id="simEmail" value="alex.morgan@example.com" required>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Phone (WhatsApp format)</label>
+                  <input type="text" class="form-control" id="simPhone" value="+15550192834" required>
+                </div>
+                <div class="form-group">
+                  <label>Campaign Name</label>
+                  <input type="text" class="form-control" id="simCampaign" value="Summer 2026 Promo" required>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Form Name / ID</label>
+                <input type="text" class="form-control" id="simForm" value="Instant Lead Form #1092" required>
+              </div>
+              <button type="submit" class="btn btn-primary" style="width:100%;margin-top:8px;justify-content:center;">
+                <i data-lucide="send"></i> Fire Fake Lead Event
+              </button>
+            </form>
+          </div>
+
+          <div class="chart-card">
+            <h3 style="margin-bottom:12px;">How to Test with Real Webhooks</h3>
+            <ol class="test-guide-list">
+              <li><strong>Install ngrok</strong> (free tunnel tool): <code>npm install -g ngrok</code></li>
+              <li>Start tunnel: <code>ngrok http 8000</code></li>
+              <li>Copy the <code>https://xxxx.ngrok.io</code> URL</li>
+              <li>Go to <strong>Connect Meta Ads</strong> tab and paste as Callback URL</li>
+              <li>Run a test lead from a <strong>Facebook Lead Ad Preview</strong> or the simulator above</li>
+              <li>Watch the lead appear in your Pipeline Board in real time ✅</li>
+            </ol>
+            <div class="info-box" style="margin-top:16px;">
+              <i data-lucide="info"></i>
+              <p>The <strong>Webhook Tester</strong> tab bypasses Meta entirely and creates the lead directly — perfect for testing your staff assignment and status flows.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ════════════ LEAD DETAIL DRAWER ════════════ -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="lead-drawer" id="leadDrawer">
+    <div class="drawer-head">
+      <div>
+        <h2 id="drawerLeadName">Lead Details</h2>
+        <span id="drawerLeadTime" class="hint"></span>
+      </div>
+      <button class="btn-icon" id="closeDrawerBtn"><i data-lucide="x"></i></button>
+    </div>
+    <div class="drawer-body">
+      <div class="detail-section">
+        <p class="detail-label">Contact Info</p>
+        <div class="detail-grid">
+          <div class="detail-item"><i data-lucide="mail"></i><span id="drawerLeadEmail">—</span></div>
+          <div class="detail-item"><i data-lucide="phone"></i><span id="drawerLeadPhone">—</span></div>
+          <div class="detail-item"><i data-lucide="megaphone"></i><span id="drawerLeadCampaign">—</span></div>
+          <div class="detail-item"><i data-lucide="hash"></i><code id="drawerLeadMetaId" style="font-size:11px;">—</code></div>
+        </div>
+      </div>
+
+      <div class="detail-section">
+        <p class="detail-label">Pipeline Status</p>
+        <select class="form-control" id="drawerStatusSelect">
+          <option value="new">🔵 New</option>
+          <option value="contacted">🟡 Contacted</option>
+          <option value="qualified">🟣 Qualified</option>
+          <option value="converted">🟢 Converted</option>
+          <option value="lost">🔴 Lost</option>
+        </select>
+      </div>
+
+      <div class="detail-section">
+        <p class="detail-label" style="display:flex;align-items:center;gap:6px;"><i data-lucide="message-circle" style="width:14px;color:#25d366;"></i> WhatsApp</p>
+        <div class="chat-box" id="whatsappChatBox">
+          <p class="chat-empty">No messages yet</p>
+        </div>
+        <form id="whatsappForm" class="chat-input-row">
+          <input type="text" class="form-control" id="waMsgInput" placeholder="Type a message…" required>
+          <button type="submit" class="btn btn-whatsapp"><i data-lucide="send"></i></button>
+        </form>
+      </div>
+
+      <div class="detail-section">
+        <p class="detail-label">Internal Notes</p>
+        <textarea class="form-control" id="drawerNotesTextarea" rows="3" placeholder="Add internal sales notes…"></textarea>
+        <button class="btn btn-ghost" id="saveNotesBtn" style="width:100%;margin-top:8px;justify-content:center;">
+          <i data-lucide="save"></i> Save Notes
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ════════════ MODAL: CREATE CAMPAIGN ════════════ -->
+  <div class="modal-backdrop" id="createCampaignModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>New Campaign</h3>
+        <button class="btn-icon" id="closeCreateCampaignModal"><i data-lucide="x"></i></button>
+      </div>
+      <form id="createCampaignForm">
+        <div class="form-group">
+          <label>Campaign Name <span class="req">*</span></label>
+          <input type="text" class="form-control" id="campName" placeholder="e.g. Summer Promo 2026" required>
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <input type="text" class="form-control" id="campDesc" placeholder="Short description">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Meta Lead Form ID</label>
+            <input type="text" class="form-control" id="campFormId" placeholder="From Meta Ads Manager">
+          </div>
+          <div class="form-group">
+            <label>Meta Ad Account ID</label>
+            <input type="text" class="form-control" id="campAdAccountId" placeholder="act_XXXXXXXXXX">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Assign to Staff Member</label>
+          <select class="form-control" id="campAssignedUser">
+            <option value="">— Unassigned —</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="cancelCreateCampaign">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i data-lucide="plus"></i> Create Campaign</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: INVITE STAFF ════════════ -->
+  <div class="modal-backdrop" id="inviteStaffModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>Invite Staff Member</h3>
+        <button class="btn-icon" id="closeInviteStaffModal"><i data-lucide="x"></i></button>
+      </div>
+      <form id="inviteStaffForm">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Full Name <span class="req">*</span></label>
+            <input type="text" class="form-control" id="staffName" placeholder="e.g. Jane Smith" required>
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select class="form-control" id="staffRole">
+              <option value="agent">Agent (campaign-scoped)</option>
+              <option value="admin">Admin (full access)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Email <span class="req">*</span></label>
+            <input type="email" class="form-control" id="staffEmail" placeholder="jane@yourcompany.com" required>
+          </div>
+          <div class="form-group">
+            <label>Temporary Password <span class="req">*</span></label>
+            <input type="password" class="form-control" id="staffPassword" placeholder="Min 6 chars" required>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="cancelInviteStaff">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i data-lucide="user-plus"></i> Send Invite</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: GOOGLE SHEETS ════════════ -->
+  <div class="modal-backdrop" id="googleSheetsModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>Connect Google Sheet</h3>
+        <button class="btn-icon" id="closeGoogleSheetsModal"><i data-lucide="x"></i></button>
+      </div>
+      <form id="googleSheetsForm">
+        <div class="demo-hint" style="margin-bottom:16px;">
+          <strong>Step 1:</strong> Share your Google Sheet as an Editor with this service account:<br>
+          <code style="font-size:11px;user-select:all;">lead-sync@crm-saas-prod.iam.gserviceaccount.com</code>
+        </div>
+        <div class="form-group">
+          <label>Google Sheet URL <span class="req">*</span></label>
+          <input type="url" class="form-control" id="gsUrl" placeholder="https://docs.google.com/spreadsheets/d/..." required>
+        </div>
+        <div class="form-group">
+          <label>Worksheet Name</label>
+          <input type="text" class="form-control" id="gsSheetName" value="Sheet1" placeholder="Sheet1">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="cancelGoogleSheets">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="background:#0F9D58;color:white;border:none;"><i data-lucide="file-spreadsheet"></i> Connect Sheet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: FB PAGE SELECTION ════════════ -->
+  <div class="modal-backdrop" id="fbPageModal">
+    <div class="modal-box" style="max-width:500px;">
+      <div class="modal-head">
+        <h3>Select Facebook Page</h3>
+        <button class="btn-icon" id="closeFbPageModal"><i data-lucide="x"></i></button>
+      </div>
+      <div style="padding: 16px 0;">
+        <p class="hint" style="margin-bottom: 16px;">Select the Facebook Page you want to connect to this CRM organization.</p>
+        <div id="fbPageList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+          <!-- Radio buttons injected here -->
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost btn" id="cancelFbPageModal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnContinueFbForms">Continue <i data-lucide="arrow-right"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: FB FORMS SELECTION ════════════ -->
+  <div class="modal-backdrop" id="fbFormsModal">
+    <div class="modal-box" style="max-width:500px;">
+      <div class="modal-head">
+        <h3>Select Lead Forms</h3>
+        <button class="btn-icon" id="closeFbFormsModal"><i data-lucide="x"></i></button>
+      </div>
+      <div style="padding: 16px 0;">
+        <p class="hint" style="margin-bottom: 16px;">Select which Lead Forms should automatically create leads in the CRM.</p>
+        <div id="fbFormsList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+          <!-- Checkboxes injected here -->
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost btn" id="backToFbPageModal"><i data-lucide="arrow-left"></i> Back</button>
+        <button type="button" class="btn btn-primary" id="btnCompleteFbConnect">Connect Forms <i data-lucide="check"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: MANAGE FB CONNECTION ════════════ -->
+  <div class="modal-backdrop" id="manageMetaModal">
+    <div class="modal-box" style="max-width:500px;">
+      <div class="modal-head">
+        <h3>Manage Connection</h3>
+        <button class="btn-icon" id="closeManageMetaModal"><i data-lucide="x"></i></button>
+      </div>
+      <div style="padding: 16px 0;">
+        <div class="detail-section">
+          <p class="detail-label">Facebook Page</p>
+          <div style="font-weight: 600; font-size: 15px;" id="manageFbPageName">—</div>
+        </div>
+        <div class="detail-section">
+          <p class="detail-label">Connection Status</p>
+          <div id="manageFbStatus">
+            <span class="pill active">Connected</span>
+          </div>
+        </div>
+        <div class="detail-section">
+          <p class="detail-label">Connected Lead Forms</p>
+          <ul id="manageFbFormsList" style="margin-left: 20px; font-size: 13px; color: var(--text-2); padding-top: 4px;">
+            <!-- list items injected here -->
+          </ul>
+        </div>
+      </div>
+      <div class="modal-actions" style="justify-content: space-between;">
+        <button type="button" class="btn btn-secondary" style="color: var(--red); border-color: var(--red);" id="btnDisconnectFb">
+          <i data-lucide="trash-2"></i> Disconnect
+        </button>
+        <button type="button" class="btn-ghost btn" id="btnDoneManageFb">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: AUTH ════════════ -->
+  <div class="modal-backdrop" id="authModal">
+    <div class="modal-box" style="max-width:420px;">
+      <div class="modal-head">
+        <h3 id="authModalTitle">Sign In</h3>
+        <button class="btn-icon" id="closeAuthModalBtn"><i data-lucide="x"></i></button>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="authTabLogin">Sign In</button>
+        <button class="auth-tab" id="authTabRegister">Create Account</button>
+      </div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" class="form-control" id="loginEmail" value="admin@acme.com" required>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" class="form-control" id="loginPassword" value="password123" required>
+        </div>
+        <div class="demo-hint">
+          <strong>Demo accounts:</strong><br>
+          admin@acme.com / password123 (Acme Agency)<br>
+          admin@apex.com / password123 (Apex Real Estate)
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;">
+          <i data-lucide="log-in"></i> Sign In
+        </button>
+      </form>
+
+      <form id="registerForm" style="display:none;">
+        <div class="form-group">
+          <label>Company / Organization Name <span class="req">*</span></label>
+          <input type="text" class="form-control" id="regOrgName" placeholder="e.g. Horizon Real Estate" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Your Full Name <span class="req">*</span></label>
+            <input type="text" class="form-control" id="regUserName" placeholder="Michael Scott" required>
+          </div>
+          <div class="form-group">
+            <label>Business Email <span class="req">*</span></label>
+            <input type="email" class="form-control" id="regEmail" placeholder="michael@horizon.com" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Password <span class="req">*</span></label>
+          <input type="password" class="form-control" id="regPassword" placeholder="Minimum 6 characters" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;">
+          <i data-lucide="building"></i> Create Account
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ════════════ MODAL: SIMULATE LEAD (quick) ════════════ -->
+  <div class="modal-backdrop" id="simulateModal">
+    <div class="modal-box" style="max-width:460px;">
+      <div class="modal-head">
+        <h3>Simulate Meta Lead</h3>
+        <button class="btn-icon" id="closeSimulateModal"><i data-lucide="x"></i></button>
+      </div>
+      <form id="quickSimulateForm">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" class="form-control" id="quickSimName" value="Sarah Jenkins" required>
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" class="form-control" id="quickSimEmail" value="sarah.j@example.com" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Phone</label>
+            <input type="text" class="form-control" id="quickSimPhone" value="+14155552671" required>
+          </div>
+          <div class="form-group">
+            <label>Campaign</label>
+            <select class="form-control" id="quickSimCampaign">
+              <option value="">— select —</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="cancelSimulateModal">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i data-lucide="zap"></i> Generate Lead</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
