@@ -662,7 +662,7 @@ async function loadIntegrations() {
       html += `
         <div class="integration-card">
           <div class="integration-card-left">
-            <div class="integration-icon"><i data-lucide="facebook" style="color: #1877F2;"></i></div>
+            <div class="integration-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1877F2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-facebook"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></div>
             <div class="integration-info">
               <h3>Facebook Lead Ads <span class="integration-status">Connected</span></h3>
               <p>Receiving leads from your connected Facebook Pages</p>
@@ -997,7 +997,7 @@ async function loadConnections() {
       card.className = 'connect-new-card';
       card.style.border = '1px solid var(--accent)';
       card.innerHTML = `
-        <div class="connect-icon"><i data-lucide="facebook" style="color: #1877F2;"></i></div>
+        <div class="connect-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1877F2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-facebook"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></div>
         <div class="connect-info">
           <h3 style="display:flex; align-items:center; gap:8px;">Facebook Lead Ads <span class="pill active" style="font-size:10px;">✓ Connected</span></h3>
           <p style="margin-bottom:8px;">Receiving leads from <strong>${esc(c.page_name)}</strong></p>
