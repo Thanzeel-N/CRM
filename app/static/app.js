@@ -1224,6 +1224,31 @@ document.addEventListener('DOMContentLoaded', () => {
     window.print();
   });
 
+  // Sidebar Toggle for Mobile
+  const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+  const sidebar = document.getElementById('sidebar');
+  const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+
+  if (sidebarToggleBtn && sidebar && sidebarBackdrop) {
+    function toggleSidebar() {
+      sidebar.classList.toggle('open');
+      sidebarBackdrop.classList.toggle('active');
+    }
+    sidebarToggleBtn.addEventListener('click', toggleSidebar);
+    sidebarBackdrop.addEventListener('click', toggleSidebar);
+    
+    // Close sidebar when clicking a nav item on mobile
+    const navItems = sidebar.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+      item.addEventListener('click', () => {
+        if (window.innerWidth <= 900) {
+          sidebar.classList.remove('open');
+          sidebarBackdrop.classList.remove('active');
+        }
+      });
+    });
+  }
+
   loadAll();
 
   // Handle OAuth callback success message
