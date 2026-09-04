@@ -157,7 +157,7 @@
       <div id="tab-pipeline" class="tab-pane active">
         <div class="section-head">
           <h2>Lead Pipeline</h2>
-          <span class="hint">Click a card to manage lead & send WhatsApp</span>
+          <span class="hint">Click a card to manage lead details</span>
         </div>
         <div class="kanban-board">
           <div class="kanban-col" data-status="new">
@@ -390,6 +390,7 @@
         </select>
       </div>
 
+      <!-- WhatsApp section disabled until integration is configured
       <div class="detail-section">
         <p class="detail-label" style="display:flex;align-items:center;gap:6px;"><i data-lucide="message-circle" style="width:14px;color:#25d366;"></i> WhatsApp</p>
         <div class="chat-box" id="whatsappChatBox">
@@ -400,7 +401,11 @@
           <button type="submit" class="btn btn-whatsapp"><i data-lucide="send"></i></button>
         </form>
       </div>
+      -->
 
+      <!-- Hidden placeholders so JS refs do not break (WhatsApp disabled) -->
+      <div id="whatsappChatBox" style="display:none;"></div>
+      <form id="whatsappForm" style="display:none;"><input id="waMsgInput"></form>
       <div class="detail-section">
         <p class="detail-label">Internal Notes</p>
         <textarea class="form-control" id="drawerNotesTextarea" rows="3" placeholder="Add internal sales notes…"></textarea>

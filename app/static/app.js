@@ -80,8 +80,10 @@ function updateUserUI() {
 // ─── Navigation ──────────────────────────────────────────────────
 document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
   item.addEventListener('click', () => {
-    if (!state.user) { openModal('authModal'); return; }
     const tab = item.dataset.tab;
+    // Require login only for admin-only management tabs
+    const adminTabs = ['tab-campaigns', 'tab-staff', 'tab-connect'];
+    if (!state.user && adminTabs.includes(tab)) { openModal('authModal'); return; }
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     item.classList.add('active');
@@ -385,39 +387,16 @@ document.getElementById('saveNotesBtn').addEventListener('click', async () => {
   } catch (err) { toast(err.message, 'error'); }
 });
 
-// WhatsApp chat
+// WhatsApp chat — DISABLED (WhatsApp integration not configured)
 async function loadChatHistory(leadId) {
-  try {
-    const messages = await api(`/leads/${leadId}/messages`) || [];
-    const box = document.getElementById('whatsappChatBox');
-    if (!messages.length) {
-      box.innerHTML = '<p class="chat-empty">No messages yet</p>';
-      return;
-    }
-    box.innerHTML = messages.map(m => `
-      <div class="chat-bubble ${m.direction}">
-        ${esc(m.message_text)}
-        <div style="font-size:10px;opacity:.6;margin-top:3px;text-align:right;">${new Date(m.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
-      </div>`).join('');
-    box.scrollTop = box.scrollHeight;
-  } catch (err) { console.error('Chat load failed:', err); }
+  // WhatsApp disabled: skip API call
+  const box = document.getElementById('whatsappChatBox');
+  if (box) box.innerHTML = '<p class="chat-empty">WhatsApp integration not enabled</p>';
 }
 
 document.getElementById('whatsappForm').addEventListener('submit', async e => {
   e.preventDefault();
-  if (!state.activeLead) return;
-  const input = document.getElementById('waMsgInput');
-  const msg = input.value.trim();
-  if (!msg) return;
-  try {
-    await api('/leads/whatsapp/send', {
-      method: 'POST',
-      body: JSON.stringify({ lead_id: state.activeLead.id, message: msg }),
-    });
-    input.value = '';
-    loadChatHistory(state.activeLead.id);
-    loadLeads();
-  } catch (err) { toast(err.message, 'error'); }
+  toast('WhatsApp integration is not enabled yet.', 'info');
 });
 
 // ─── Search / Filter ──────────────────────────────────────────────
