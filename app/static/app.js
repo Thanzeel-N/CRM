@@ -985,6 +985,13 @@ async function loadConnections() {
     if (!container) return;
     
     container.innerHTML = '';
+    
+    // Toggle the "Connect Facebook" card based on whether a connection exists
+    const fbConnectCard = document.getElementById('fbConnectCard');
+    if (fbConnectCard) {
+      fbConnectCard.style.display = conns.length > 0 ? 'none' : 'flex';
+    }
+
     conns.forEach(c => {
       const card = document.createElement('div');
       card.className = 'connect-new-card';
@@ -998,8 +1005,8 @@ async function loadConnections() {
             Lead Forms: ${c.connected_forms.length} connected
           </div>
         </div>
-        <button class="btn btn-secondary" onclick="openManageMeta(${c.id}, '${esc(c.page_id)}', '${esc(c.page_name)}', '${esc(JSON.stringify(c.connected_forms))}')">
-          <i data-lucide="settings"></i> Manage
+        <button class="btn btn-secondary" style="color: var(--red); border-color: var(--red);" onclick="disconnectMetaCard(${c.id})">
+          <i data-lucide="trash-2"></i> Remove
         </button>
       `;
       container.appendChild(card);
@@ -1172,6 +1179,18 @@ function openManageMeta(connId, pageId, pageName, formsJson) {
   };
   openModal('manageMetaModal');
 }
+
+window.disconnectMetaCard = async function(connId) {
+  if (confirm('Are you sure you want to disconnect this Facebook Page? Leads will stop syncing immediately.')) {
+    try {
+      await api(`/integrations/facebook/connections/${connId}/disconnect`, { method: 'POST' });
+      toast('Facebook account disconnected successfully', 'success');
+      loadConnections();
+    } catch (e) {
+      toast('Failed to disconnect: ' + e.message, 'error');
+    }
+  }
+};
 
 document.getElementById('btnDoneManageFb')?.addEventListener('click', () => closeModal('manageMetaModal'));
 document.getElementById('closeManageMetaModal')?.addEventListener('click', () => closeModal('manageMetaModal'));
