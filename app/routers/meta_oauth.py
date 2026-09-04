@@ -6,10 +6,15 @@ import httpx
 import jwt
 from datetime import datetime, timedelta
 
+import logging
+
 from app.config import settings
 from app.database import get_db
-from app.models import User, MetaPageConnection
+from app.models import User, MetaPageConnection, Lead
 from app.services.auth import get_current_user, SECRET_KEY, ALGORITHM
+from app.services.meta import parse_field_data
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/integrations/facebook", tags=["facebook"])
 
@@ -178,15 +183,41 @@ async def connect_page(
 ):
     user_access_token = decode_fb_session_token(fb_session_token)
     
+    sync_results = {
+        "forms_synced": 0,
+        "leads_imported": 0,
+        "duplicates_skipped": 0,
+        "failed_forms": 0
+    }
+    
     if settings.meta_app_id == "local_dev_meta_app_id":
         page_access_token = "mock_page_token"
     else:
-        # 1. Get Page Access Token
-        url_accounts = f"{FB_API_BASE}/me/accounts"
-        params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
-        
-        page_access_token = None
         async with httpx.AsyncClient() as client:
+            # 0. Verify permissions
+            url_perms = f"{FB_API_BASE}/me/permissions"
+            params_perms = {"access_token": user_access_token}
+            resp_perms = await client.get(url_perms, params=params_perms)
+            perms_data = resp_perms.json()
+            
+            if "error" in perms_data:
+                raise HTTPException(status_code=400, detail="Failed to verify permissions")
+                
+            granted_scopes = [p["permission"] for p in perms_data.get("data", []) if p["status"] == "granted"]
+            required_scopes = ["pages_show_list", "pages_manage_metadata", "leads_retrieval"]
+            missing_scopes = [s for s in required_scopes if s not in granted_scopes]
+            
+            if missing_scopes:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Missing required Facebook permissions: {', '.join(missing_scopes)}"
+                )
+
+            # 1. Get Page Access Token
+            url_accounts = f"{FB_API_BASE}/me/accounts"
+            params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
+            
+            page_access_token = None
             resp = await client.get(url_accounts, params=params_acc)
             data = resp.json()
             for p in data.get("data", []):
@@ -205,11 +236,80 @@ async def connect_page(
             }
             resp_sub = await client.post(url_sub, params=params_sub)
             sub_data = resp_sub.json()
-            if "error" in sub_data:
-                # Log error but don't fail completely
-                pass
             
-    # 3. Save to DB
+            if "error" in sub_data:
+                err_msg = sub_data["error"].get("message", "Unknown error subscribing webhook")
+                logger.error(f"Webhook subscription failed for page {page_id}: {err_msg}")
+                raise HTTPException(status_code=400, detail=f"Webhook subscription failed: {err_msg}")
+            
+            # 3. Historical Lead Sync
+            seen_lead_ids = set()
+            for form_id in forms:
+                url_leads = f"{FB_API_BASE}/{form_id}/leads"
+                params_leads = {
+                    "access_token": page_access_token,
+                    "fields": "id,created_time,field_data,campaign_name,form_id"
+                }
+                
+                try:
+                    form_success = True
+                    while url_leads:
+                        resp_leads = await client.get(url_leads, params=params_leads)
+                        leads_data = resp_leads.json()
+                        
+                        if "error" in leads_data:
+                            logger.error(f"Error syncing leads for form {form_id}: {leads_data['error']}")
+                            form_success = False
+                            break
+                            
+                        # Process leads
+                        for l in leads_data.get("data", []):
+                            fb_lead_id = l.get("id")
+                            if not fb_lead_id or fb_lead_id in seen_lead_ids:
+                                sync_results["duplicates_skipped"] += 1
+                                continue
+                                
+                            existing = db.query(Lead).filter(
+                                Lead.fb_lead_id == fb_lead_id,
+                                Lead.org_id == current_user.org_id
+                            ).first()
+                            
+                            if existing:
+                                seen_lead_ids.add(fb_lead_id)
+                                sync_results["duplicates_skipped"] += 1
+                                continue
+                                
+                            fields = parse_field_data(l.get("field_data", []))
+                            
+                            new_lead = Lead(
+                                org_id=current_user.org_id,
+                                fb_lead_id=fb_lead_id,
+                                name=fields.get("full_name") or fields.get("name"),
+                                email=fields.get("email"),
+                                phone=fields.get("phone_number"),
+                                campaign_name=l.get("campaign_name"),
+                                form_name=l.get("form_id"),
+                                raw_data=l
+                            )
+                            db.add(new_lead)
+                            seen_lead_ids.add(fb_lead_id)
+                            sync_results["leads_imported"] += 1
+                            
+                        # Pagination
+                        paging = leads_data.get("paging", {})
+                        url_leads = paging.get("next")
+                        params_leads = None
+                        
+                    if form_success:
+                        sync_results["forms_synced"] += 1
+                    else:
+                        sync_results["failed_forms"] += 1
+                        
+                except Exception as e:
+                    logger.exception(f"Exception syncing form {form_id}: {e}")
+                    sync_results["failed_forms"] += 1
+            
+    # 4. Save to DB
     conn = db.query(MetaPageConnection).filter(
         MetaPageConnection.org_id == current_user.org_id,
         MetaPageConnection.page_id == page_id
@@ -235,7 +335,11 @@ async def connect_page(
     db.commit()
     db.refresh(conn)
     
-    return {"status": "success", "id": conn.id}
+    return {
+        "status": "success", 
+        "id": conn.id,
+        "sync_results": sync_results
+    }
 
 @router.get("/connections")
 def list_connections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
