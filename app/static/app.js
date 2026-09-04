@@ -996,7 +996,7 @@ document.getElementById('btnConnectFacebook')?.addEventListener('click', async (
     const width = 600, height = 700;
     const left = (window.innerWidth - width) / 2;
     const top = (window.innerHeight - height) / 2;
-    window.open(url, 'fb_oauth', \`width=\${width},height=\${height},top=\${top},left=\${left}\`);
+    window.open(url, 'fb_oauth', `width=${width},height=${height},top=${top},left=${left}`);
   } catch (err) {
     toast('Could not start Facebook connection: ' + err.message, 'error');
   }
@@ -1019,7 +1019,7 @@ window.addEventListener('message', async (event) => {
 async function exchangeFbToken(code) {
   try {
     const base_url = window.location.origin;
-    const redirect_uri = \`\${base_url}/integrations/facebook/callback\`;
+    const redirect_uri = `${base_url}/integrations/facebook/callback`;
     const res = await api('/integrations/facebook/exchange', {
       method: 'POST',
       body: JSON.stringify({ code, redirect_uri })
@@ -1027,7 +1027,7 @@ async function exchangeFbToken(code) {
     tempFbSession = res.fb_session_token;
     
     // Now fetch pages
-    const pagesRes = await api(\`/integrations/facebook/pages?fb_session_token=\${tempFbSession}\`);
+    const pagesRes = await api(`/integrations/facebook/pages?fb_session_token=${tempFbSession}`);
     if (!pagesRes.pages || pagesRes.pages.length === 0) {
       toast('No Facebook Pages are available for this account.', 'error');
       return;
@@ -1037,12 +1037,12 @@ async function exchangeFbToken(code) {
     const list = document.getElementById('fbPageList');
     list.innerHTML = '';
     pagesRes.pages.forEach((p, i) => {
-      list.innerHTML += \`
+      list.innerHTML += `
         <label style="display:flex; align-items:center; gap:12px; padding:12px; background:var(--bg-2); border-radius:8px; border:1px solid var(--border); cursor:pointer;">
-          <input type="radio" name="fb_page_sel" value="\${esc(p.id)}" data-name="\${esc(p.name)}" \${i===0?'checked':''}>
-          <span style="font-weight:600;">\${esc(p.name)}</span>
+          <input type="radio" name="fb_page_sel" value="${esc(p.id)}" data-name="${esc(p.name)}" ${i===0?'checked':''}>
+          <span style="font-weight:600;">${esc(p.name)}</span>
         </label>
-      \`;
+      `;
     });
     openModal('fbPageModal');
     
@@ -1070,7 +1070,7 @@ document.getElementById('btnContinueFbForms')?.addEventListener('click', async (
   
   try {
     toast('Fetching Lead Forms...');
-    const res = await api(\`/integrations/facebook/pages/\${tempFbPageId}/forms?fb_session_token=\${tempFbSession}\`);
+    const res = await api(`/integrations/facebook/pages/${tempFbPageId}/forms?fb_session_token=${tempFbSession}`);
     
     const list = document.getElementById('fbFormsList');
     list.innerHTML = '';
@@ -1078,15 +1078,15 @@ document.getElementById('btnContinueFbForms')?.addEventListener('click', async (
       list.innerHTML = '<p class="hint">No Lead Forms found on this page.</p>';
     } else {
       res.forms.forEach(f => {
-        list.innerHTML += \`
+        list.innerHTML += `
           <label style="display:flex; align-items:center; gap:12px; padding:12px; background:var(--bg-2); border-radius:8px; border:1px solid var(--border); cursor:pointer;">
-            <input type="checkbox" name="fb_form_sel" value="\${esc(f.id)}" checked>
+            <input type="checkbox" name="fb_form_sel" value="${esc(f.id)}" checked>
             <div>
-              <div style="font-weight:600;">\${esc(f.name)}</div>
-              <div style="font-size:11px; color:var(--text-3);">Form ID: \${esc(f.id)} • Status: \${f.status||'ACTIVE'}</div>
+              <div style="font-weight:600;">${esc(f.name)}</div>
+              <div style="font-size:11px; color:var(--text-3);">Form ID: ${esc(f.id)} • Status: ${f.status||'ACTIVE'}</div>
             </div>
           </label>
-        \`;
+        `;
       });
     }
     openModal('fbFormsModal');
@@ -1134,13 +1134,13 @@ function openManageMeta(connId, pageId, pageName, formsJson) {
   list.innerHTML = '';
   if (forms.length === 0) list.innerHTML = '<li>No forms connected</li>';
   else forms.forEach(f => {
-    list.innerHTML += \`<li>Form ID: \${esc(f)}</li>\`;
+    list.innerHTML += `<li>Form ID: ${esc(f)}</li>`;
   });
   
   document.getElementById('btnDisconnectFb').onclick = async () => {
     if (confirm('Are you sure you want to disconnect this page?')) {
       try {
-        await api(\`/integrations/facebook/connections/\${connId}/disconnect\`, { method: 'POST' });
+        await api(`/integrations/facebook/connections/${connId}/disconnect`, { method: 'POST' });
         toast('Disconnected successfully', 'success');
         closeModal('manageMetaModal');
         loadConnections();
