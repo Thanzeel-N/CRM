@@ -2,6 +2,14 @@
    MetaCRM — App Logic
    ═══════════════════════════════════════════════════════════════ */
 
+// ─── Global Error Catchers ────────────────────────────────────────
+window.onerror = function(msg, src, line, col, err) {
+  console.error('[GlobalError]', msg, '\n  Source:', src, 'Line:', line, 'Col:', col, '\n  Error:', err);
+};
+window.addEventListener('unhandledrejection', function(event) {
+  console.error('[UnhandledPromise]', event.reason);
+});
+
 // ─── State ───────────────────────────────────────────────────────
 const state = {
   token: localStorage.getItem('crm_token'),
@@ -16,13 +24,17 @@ const state = {
 
 // ─── API Helper ──────────────────────────────────────────────────
 async function api(path, opts = {}) {
+  const method = (opts.method || 'GET').toUpperCase();
+  console.log(`[API] ${method} ${path}`);
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
   const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401) { doLogout(); return null; }
+  if (res.status === 401) { console.warn('[API] 401 Unauthorized — logging out'); doLogout(); return null; }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const errMsg = err.detail || `HTTP ${res.status}`;
+    console.error(`[API Error] ${method} ${path} →`, res.status, errMsg, err);
+    throw new Error(errMsg);
   }
   if (res.status === 204) return null;
   return res.json();
@@ -98,8 +110,18 @@ document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
 });
 
 // ─── Modals ──────────────────────────────────────────────────────
-function openModal(id)  { document.getElementById(id)?.classList.add('active'); }
-function closeModal(id) { document.getElementById(id)?.classList.remove('active'); }
+function openModal(id) {
+  console.log('[Modal] Opening:', id);
+  const el = document.getElementById(id);
+  if (!el) { console.warn('[Modal] Element not found:', id); return; }
+  el.classList.add('active');
+}
+function closeModal(id) {
+  console.log('[Modal] Closing:', id);
+  const el = document.getElementById(id);
+  if (!el) { console.warn('[Modal] Element not found:', id); return; }
+  el.classList.remove('active');
+}
 
 document.querySelectorAll('.modal-backdrop').forEach(m => {
   m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); });
@@ -186,7 +208,7 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
     closeModal('authModal');
     toast(`Welcome back, ${data.user.name}!`);
     loadAll();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[Login Error]', err); toast(err.message, 'error'); }
 });
 
 document.getElementById('registerForm').addEventListener('submit', async e => {
@@ -205,7 +227,7 @@ document.getElementById('registerForm').addEventListener('submit', async e => {
     closeModal('authModal');
     toast(`Account created! Welcome, ${data.user.name}!`);
     loadAll();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[Register Error]', err); toast(err.message, 'error'); }
 });
 
 // ─── Leads ───────────────────────────────────────────────────────
@@ -371,7 +393,7 @@ document.getElementById('drawerStatusSelect').addEventListener('change', async f
     state.activeLead = updated;
     loadLeads();
     toast('Status updated ✓');
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[UpdateStatus Error]', err); toast(err.message, 'error'); }
 });
 
 // Save notes
@@ -384,7 +406,7 @@ document.getElementById('saveNotesBtn').addEventListener('click', async () => {
       body: JSON.stringify({ status: state.activeLead.status, notes }),
     });
     toast('Notes saved ✓');
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[AssignLead Error]', err); toast(err.message, 'error'); }
 });
 
 // WhatsApp chat — DISABLED (WhatsApp integration not configured)
@@ -429,7 +451,7 @@ document.getElementById('simulatorForm').addEventListener('submit', async e => {
     });
     toast(`Lead "${lead.name}" created in pipeline ✓`);
     loadLeads();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[AddCampaign Error]', err); toast(err.message, 'error'); }
 });
 
 document.getElementById('quickSimulateForm').addEventListener('submit', async e => {
@@ -450,7 +472,7 @@ document.getElementById('quickSimulateForm').addEventListener('submit', async e 
     closeModal('simulateModal');
     toast(`Lead "${lead.name}" added to pipeline ✓`);
     loadLeads();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[EditCampaign Error]', err); toast(err.message, 'error'); }
 });
 
 // ─── Campaigns ───────────────────────────────────────────────────
@@ -537,7 +559,7 @@ document.getElementById('createCampaignForm').addEventListener('submit', async e
     e.target.reset();
     closeModal('createCampaignModal');
     loadCampaigns();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[AddStaff Error]', err); toast(err.message, 'error'); }
 });
 
 // ─── Staff ───────────────────────────────────────────────────────
@@ -580,14 +602,14 @@ async function deactivateStaff(id) {
     await api(`/staff/${id}/deactivate`, { method:'PATCH' });
     toast('Staff member deactivated');
     loadStaff();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[UpdateStaff Error]', err); toast(err.message, 'error'); }
 }
 async function activateStaff(id) {
   try {
     await api(`/staff/${id}/activate`, { method:'PATCH' });
     toast('Staff member activated ✓');
     loadStaff();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[DeleteStaff Error]', err); toast(err.message, 'error'); }
 }
 
 document.getElementById('inviteStaffForm').addEventListener('submit', async e => {
@@ -607,7 +629,7 @@ document.getElementById('inviteStaffForm').addEventListener('submit', async e =>
     closeModal('inviteStaffModal');
     loadStaff();
     loadCampaigns(); // refresh assignment dropdowns
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[ExportLeads Error]', err); toast(err.message, 'error'); }
 });
 
 // ─── Integrations & Lead Sources ─────────────────────────────────
@@ -682,7 +704,7 @@ async function loadIntegrations() {
             await api('/integrations/google-sheets/disconnect', { method: 'POST' });
             toast('Google Sheets disconnected');
             loadIntegrations();
-          } catch (err) { toast(err.message, 'error'); }
+          } catch (err) { console.error('[OrgSettings Error]', err); toast(err.message, 'error'); }
         });
       }
     }
@@ -761,9 +783,7 @@ document.getElementById('btnConnectFacebook')?.addEventListener('click', async (
         }
       });
     }
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+  } catch (err) { console.error('[FbAutoConnect Error]', err); toast(err.message, 'error'); }
 });
 
 document.getElementById('btnConnectGoogleSheets')?.addEventListener('click', () => {
@@ -785,7 +805,7 @@ document.getElementById('googleSheetsForm')?.addEventListener('submit', async (e
     toast('Google Sheet Connected! Leads will now sync automatically. ✓');
     closeModal('googleSheetsModal');
     loadIntegrations();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { console.error('[GoogleSheets Error]', err); toast(err.message, 'error'); }
 });
 
 // ─── Charts ──────────────────────────────────────────────────────
@@ -1005,6 +1025,7 @@ document.getElementById('btnConnectFacebook')?.addEventListener('click', async (
     const top = (window.innerHeight - height) / 2;
     window.open(url, 'fb_oauth', `width=${width},height=${height},top=${top},left=${left}`);
   } catch (err) {
+    console.error('[FbConnect Error]', err);
     toast('Could not start Facebook connection: ' + err.message, 'error');
   }
 });
@@ -1054,6 +1075,7 @@ async function exchangeFbToken(code) {
     openModal('fbPageModal');
     
   } catch (err) {
+    console.error('[ExchangeToken Error]', err);
     toast('Failed to exchange token: ' + err.message, 'error');
   }
 }
@@ -1098,6 +1120,7 @@ document.getElementById('btnContinueFbForms')?.addEventListener('click', async (
     }
     openModal('fbFormsModal');
   } catch (err) {
+    console.error('[FetchForms Error]', err);
     toast('Failed to fetch forms: ' + err.message, 'error');
   }
 });
@@ -1130,6 +1153,7 @@ document.getElementById('btnCompleteFbConnect')?.addEventListener('click', async
     tempFbSession = null;
     loadConnections();
   } catch(err) {
+    console.error('[CompleteFbConnect Error]', err);
     toast('Connection failed: ' + err.message, 'error');
   }
 });
@@ -1152,6 +1176,7 @@ function openManageMeta(connId, pageId, pageName, formsJson) {
         closeModal('manageMetaModal');
         loadConnections();
       } catch (e) {
+        console.error('[Disconnect Error]', e);
         toast('Failed to disconnect: ' + e.message, 'error');
       }
     }
@@ -1166,6 +1191,7 @@ window.disconnectMetaCard = async function(connId) {
       toast('Facebook account disconnected successfully', 'success');
       loadConnections();
     } catch (e) {
+      console.error('[DisconnectCard Error]', e);
       toast('Failed to disconnect: ' + e.message, 'error');
     }
   }
