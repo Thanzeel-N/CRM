@@ -47,8 +47,8 @@ def get_auth_url(request: Request):
             f"https://www.facebook.com/v20.0/dialog/oauth?"
             f"client_id={settings.meta_app_id}"
             f"&redirect_uri={redirect_uri}"
-            f"&scope=pages_show_list,pages_manage_metadata,leads_retrieval"
             f"&response_type=code"
+            f"&config_id=4640757052822358"
         )
     return {"url": url, "redirect_uri": redirect_uri}
 
@@ -204,7 +204,7 @@ async def connect_page(
                 raise HTTPException(status_code=400, detail="Failed to verify permissions")
                 
             granted_scopes = [p["permission"] for p in perms_data.get("data", []) if p["status"] == "granted"]
-            required_scopes = ["pages_show_list", "pages_manage_metadata", "leads_retrieval"]
+            required_scopes = ["pages_show_list", "leads_retrieval"]
             missing_scopes = [s for s in required_scopes if s not in granted_scopes]
             
             if missing_scopes:
