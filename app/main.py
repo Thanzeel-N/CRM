@@ -89,6 +89,14 @@ def read_root():
     return {"status": "Meta Lead Ads CRM API Running"}
 
 
+@app.get("/privacy-policy", include_in_schema=False)
+def read_privacy_policy():
+    policy_file = os.path.join(static_dir, "privacy-policy.html")
+    if os.path.exists(policy_file):
+        return FileResponse(policy_file)
+    return {"error": "Privacy policy not found"}
+
+
 @app.get("/api/health", tags=["health"])
 def health_check():
     """Liveness probe — returns 200 when the server is running."""
