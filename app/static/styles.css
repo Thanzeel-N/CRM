@@ -98,6 +98,16 @@ strong { font-weight:600; }
 ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
 
 /* ═══════════════ SIDEBAR ════════════════════════════════════════ */
+.sidebar-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(4px);
+  z-index: 190;
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s;
+}
+.sidebar-backdrop.active { opacity: 1; pointer-events: auto; }
+
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;

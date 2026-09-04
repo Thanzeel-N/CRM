@@ -67,9 +67,7 @@ async def test_connect_page_missing_permissions():
         mock_client.get.side_effect = [
             create_mock_response({
                 "data": [
-                    {"permission": "pages_show_list", "status": "granted"},
-                    {"permission": "pages_read_engagement", "status": "granted"},
-                    {"permission": "pages_manage_ads", "status": "granted"}
+                    {"permission": "pages_show_list", "status": "granted"}
                 ]
             })
         ]
@@ -99,8 +97,6 @@ async def test_connect_page_webhook_failure():
             create_mock_response({
                 "data": [
                     {"permission": "pages_show_list", "status": "granted"},
-                    {"permission": "pages_read_engagement", "status": "granted"},
-                    {"permission": "pages_manage_ads", "status": "granted"},
                     {"permission": "leads_retrieval", "status": "granted"}
                 ]
             }),
@@ -143,8 +139,6 @@ async def test_connect_page_successful_sync_with_pagination():
             create_mock_response({
                 "data": [
                     {"permission": "pages_show_list", "status": "granted"},
-                    {"permission": "pages_read_engagement", "status": "granted"},
-                    {"permission": "pages_manage_ads", "status": "granted"},
                     {"permission": "leads_retrieval", "status": "granted"}
                 ]
             }),
@@ -207,8 +201,6 @@ async def test_connect_page_failed_form_sync():
             create_mock_response({
                 "data": [
                     {"permission": "pages_show_list", "status": "granted"},
-                    {"permission": "pages_read_engagement", "status": "granted"},
-                    {"permission": "pages_manage_ads", "status": "granted"},
                     {"permission": "leads_retrieval", "status": "granted"}
                 ]
             }),
