@@ -10,7 +10,7 @@ async def fetch_lead_details(leadgen_id: str, access_token: Optional[str] = None
     """Fetch full lead field data from Meta's Graph API using the leadgen_id
     that arrives in the webhook notification."""
     url = f"{GRAPH_API_BASE}/{leadgen_id}"
-    token = access_token or settings.meta_page_access_token
+    token = access_token or getattr(settings, "meta_page_access_token", "")
     params = {
         "access_token": token,
         "fields": "field_data,ad_id,ad_name,campaign_id,campaign_name,form_id,created_time",

@@ -1078,7 +1078,7 @@ async function exchangeFbToken(code) {
     // Now fetch pages
     const pagesRes = await api(`/integrations/facebook/pages?fb_session_token=${tempFbSession}`);
     if (!pagesRes.pages || pagesRes.pages.length === 0) {
-      toast('No Facebook Pages are available for this account.', 'error');
+      toast('No Facebook Pages found. Make sure you selected your Page during Facebook login and have Admin access.', 'error');
       return;
     }
     

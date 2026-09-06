@@ -43,12 +43,13 @@ def get_auth_url(request: Request):
         # Mock local dev flow - redirect straight to our callback with a dummy code
         url = f"{redirect_uri}?code=mock_oauth_code"
     else:
+        config_id = getattr(settings, "meta_config_id", "") or "4640757052822358"
         url = (
             f"https://www.facebook.com/v20.0/dialog/oauth?"
             f"client_id={settings.meta_app_id}"
             f"&redirect_uri={redirect_uri}"
             f"&response_type=code"
-            f"&config_id=4640757052822358"
+            f"&config_id={config_id}"
         )
     return {"url": url, "redirect_uri": redirect_uri}
 
@@ -100,11 +101,31 @@ async def exchange_code(
         resp = await client.get(url, params=params)
         data = resp.json()
         if "error" in data:
+            logger.error(f"OAuth exchange error: {data['error']}")
             raise HTTPException(status_code=400, detail=data["error"].get("message", "OAuth exchange failed"))
         
         user_access_token = data.get("access_token")
         if not user_access_token:
             raise HTTPException(status_code=400, detail="No access token returned")
+
+        # Exchange short-lived token for long-lived user access token (~60 days validity)
+        long_lived_url = f"{FB_API_BASE}/oauth/access_token"
+        long_lived_params = {
+            "grant_type": "fb_exchange_token",
+            "client_id": settings.meta_app_id,
+            "client_secret": settings.meta_app_secret,
+            "fb_exchange_token": user_access_token
+        }
+        try:
+            ll_resp = await client.get(long_lived_url, params=long_lived_params)
+            ll_data = ll_resp.json()
+            if "access_token" in ll_data:
+                user_access_token = ll_data["access_token"]
+                logger.info("Successfully exchanged short-lived token for long-lived user access token")
+            else:
+                logger.warning(f"Could not exchange for long-lived token: {ll_data.get('error', {}).get('message')}")
+        except Exception as e:
+            logger.warning(f"Failed long-lived token exchange attempt: {e}")
         
         # We encrypt the FB token in a JWT so the frontend can hold it safely for the next steps
         session_token = create_fb_session_token(user_access_token)
@@ -121,15 +142,29 @@ async def get_pages(
         return {"pages": [{"id": "page_1", "name": "ABC Pharmacy"}, {"id": "page_2", "name": "XYZ Pharmacy"}]}
         
     url = f"{FB_API_BASE}/me/accounts"
-    params = {"access_token": user_access_token, "fields": "id,name,access_token"}
+    params = {"access_token": user_access_token, "fields": "id,name,access_token,tasks,category"}
     
     async with httpx.AsyncClient() as client:
         resp = await client.get(url, params=params)
         data = resp.json()
         if "error" in data:
+            logger.error(f"Error fetching pages from /me/accounts: {data['error']}")
             raise HTTPException(status_code=400, detail=data["error"].get("message", "Failed to fetch pages"))
         
-        pages = [{"id": p["id"], "name": p["name"]} for p in data.get("data", [])]
+        pages_raw = data.get("data", [])
+        logger.info(f"Fetched {len(pages_raw)} pages for user from /me/accounts")
+
+        if not pages_raw:
+            try:
+                url_perms = f"{FB_API_BASE}/me/permissions"
+                resp_perms = await client.get(url_perms, params={"access_token": user_access_token})
+                perms_data = resp_perms.json()
+                granted = [p["permission"] for p in perms_data.get("data", []) if p["status"] == "granted"]
+                logger.warning(f"0 pages returned from /me/accounts. Granted permissions on token: {granted}")
+            except Exception as ex:
+                logger.warning(f"Could not inspect permissions: {ex}")
+
+        pages = [{"id": p["id"], "name": p["name"]} for p in pages_raw]
         return {"pages": pages}
 
 @router.get("/pages/{page_id}/forms")
