@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Meta (Facebook) App credentials
     meta_app_id: str = "local_dev_meta_app_id"
     meta_app_secret: str = "local_dev_meta_app_secret"
+    meta_config_id: str = "4640757052822358"
+    meta_page_access_token: str = ""
     meta_webhook_verify_token: str = "local_dev_verify_token"
 
     # WhatsApp Cloud API
