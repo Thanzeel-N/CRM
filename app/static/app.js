@@ -20,6 +20,14 @@ const state = {
   activeLead: null,
   statusChart: null,
   campaignChart: null,
+  // Pagination
+  currentPage: 0,
+  pageSize: 100,
+  totalLeads: 0,
+  // Active date filter
+  dateFrom: null,   // 'YYYY-MM-DD' or null
+  dateTo: null,
+  activeChip: 'today',
 };
 
 // ─── API Helper ──────────────────────────────────────────────────
@@ -231,21 +239,78 @@ document.getElementById('registerForm').addEventListener('submit', async e => {
 });
 
 // ─── Leads ───────────────────────────────────────────────────────
+// ─── Date chip helpers ───────────────────────────────────────────
+function toISODate(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function setLeadDateChip(chip) {
+  state.activeChip = chip;
+  state.currentPage = 0;
+  const today = new Date();
+  const todayStr = toISODate(today);
+
+  // Update chip active styles
+  ['chipToday','chipYesterday','chipWeek','chipAll'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  const activeId = { today:'chipToday', yesterday:'chipYesterday', week:'chipWeek', all:'chipAll' }[chip];
+  if (activeId) document.getElementById(activeId)?.classList.add('active');
+
+  // Clear the flatpickr custom input
+  const fp = document.getElementById('leadsDateFilter')?._flatpickr;
+  if (fp) fp.clear();
+
+  if (chip === 'today') {
+    state.dateFrom = todayStr;
+    state.dateTo   = todayStr;
+  } else if (chip === 'yesterday') {
+    const y = new Date(today); y.setDate(y.getDate() - 1);
+    state.dateFrom = toISODate(y);
+    state.dateTo   = toISODate(y);
+  } else if (chip === 'week') {
+    const mon = new Date(today);
+    mon.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    state.dateFrom = toISODate(mon);
+    state.dateTo   = todayStr;
+  } else {
+    state.dateFrom = null;
+    state.dateTo   = null;
+  }
+  loadLeads();
+}
+
 async function loadLeads() {
-  if (!state.token) { renderKanban([]); renderTable([]); return; }
+  if (!state.token) { renderKanban([]); renderTable([], 0); return; }
   try {
     const params = new URLSearchParams();
     const search = document.getElementById('searchInput').value.trim();
     const campaign = document.getElementById('campaignFilterSelect').value;
     if (search)   params.append('search', search);
     if (campaign) params.append('campaign_id', campaign);
+    if (state.dateFrom) params.append('date_from', state.dateFrom);
+    if (state.dateTo)   params.append('date_to',   state.dateTo);
+    params.append('limit',  state.pageSize);
+    params.append('offset', state.currentPage * state.pageSize);
 
-    state.leads = await api(`/leads?${params}`) || [];
+    // Use raw fetch so we can read the X-Total-Count header
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+    const res = await fetch(`/leads?${params}`, { headers });
+    if (res.status === 401) { doLogout(); return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    state.totalLeads = parseInt(res.headers.get('X-Total-Count') || '0', 10);
+    state.leads = await res.json() || [];
+
     renderKanban(state.leads);
-    filterAndRenderTable();
+    renderTable(state.leads, state.totalLeads);
+    renderPagination();
     loadStats();
   } catch (err) { console.error('Load leads failed:', err); }
 }
+
 
 async function loadStats() {
   if (!state.token) return;
@@ -310,48 +375,44 @@ function renderKanban(leads) {
 }
 
 function filterAndRenderTable() {
-  let leadsToRender = state.leads;
-  const filterVal = document.getElementById('leadsDateFilter')?.value;
-  if (filterVal) {
-    let start, end;
-    if (filterVal.includes(' to ')) {
-      const parts = filterVal.split(' to ');
-      start = new Date(parts[0]);
-      end = new Date(parts[1]);
-    } else {
-      start = new Date(filterVal);
-      end = new Date(filterVal);
-    }
-    start.setHours(0, 0, 0, 0);
-    end.setHours(23, 59, 59, 999);
-    
-    leadsToRender = state.leads.filter(l => {
-      const d = new Date(l.created_at);
-      return d >= start && d <= end;
-    });
-  }
-  renderTable(leadsToRender);
+  // In-memory filter is now only used when flatpickr custom range is set
+  // (chip-based filters go to the server via loadLeads)
+  renderTable(state.leads, state.totalLeads);
 }
 
-function renderTable(leads) {
+
+function renderTable(leads, total) {
   const tbody = document.getElementById('leadsTableBody');
   if (!leads.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-3);">No leads found</td></tr>`;
+    const msg = (state.dateFrom || state.dateTo)
+      ? `No leads found for the selected date range.`
+      : `No leads found.`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-3);">${msg}</td></tr>`;
     return;
   }
   tbody.innerHTML = leads.map(l => {
-    const date = l.created_at ? new Date(l.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'2-digit' }) : '—';
+    const dt = l.created_at ? new Date(l.created_at) : null;
+    const dateStr = dt ? dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+    const timeStr = dt ? dt.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12: true }) : '';
     const campaign = state.campaigns.find(c => c.id === l.campaign_id);
-    const assignee = campaign?.assigned_user_name || '—';
+    const assignee = campaign?.assigned_user_name || l.campaign_name ? (campaign?.assigned_user_name || '—') : '—';
+    const formName = l.form_name || '—';
+    const statusClass = l.status.replace(' ', '-');
     return `
       <tr>
-        <td style="color:var(--text-3);font-size:11px;">#${l.id}</td>
+        <td class="col-id" style="color:var(--text-3);font-size:11px;">#${l.id}</td>
         <td><strong>${esc(l.name || '—')}</strong></td>
-        <td><div style="font-size:12px;color:var(--text-2);">${esc(l.email || '—')}<br>${esc(l.phone || '')}</div></td>
-        <td><span class="lead-tag">${esc(l.campaign_name || '—')}</span></td>
-        <td style="font-size:12px;color:var(--text-2);">${esc(assignee)}</td>
-        <td><span class="pill ${l.status}">${l.status}</span></td>
-        <td style="font-size:12px;color:var(--text-3);">${date}</td>
+        <td class="col-contact"><div style="font-size:12px;color:var(--text-2);line-height:1.6;">${esc(l.email || '—')}<br>${esc(l.phone || '')}</div></td>
+        <td class="col-campaign"><span class="lead-tag">${esc(l.campaign_name || '—')}</span></td>
+        <td class="col-form" style="font-size:12px;color:var(--text-2);">${esc(formName)}</td>
+        <td class="col-assigned" style="font-size:12px;color:var(--text-2);">${esc(assignee)}</td>
+        <td><span class="pill ${statusClass}">${l.status}</span></td>
+        <td class="col-date">
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6;">
+            ${dateStr}<br>
+            <span style="color:var(--text-3);font-size:11px;">${timeStr}</span>
+          </div>
+        </td>
         <td>
           <button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;" onclick="openLeadDrawerById(${l.id})">
             Open
@@ -359,6 +420,45 @@ function renderTable(leads) {
         </td>
       </tr>`;
   }).join('');
+}
+
+function renderPagination() {
+  const container = document.getElementById('leadsTablePagination');
+  if (!container) return;
+
+  const total = state.totalLeads;
+  const size  = state.pageSize;
+  const page  = state.currentPage;
+  const totalPages = Math.max(1, Math.ceil(total / size));
+
+  if (total <= size) {
+    container.innerHTML = `<span class="pagination-info">Showing ${total.toLocaleString()} lead${total !== 1 ? 's' : ''}</span>`;
+    return;
+  }
+
+  const start = page * size + 1;
+  const end   = Math.min(page * size + size, total);
+
+  container.innerHTML = `
+    <button class="btn btn-ghost pagination-btn" id="pagePrev" ${page === 0 ? 'disabled' : ''}>
+      <i data-lucide="chevron-left"></i> Prev
+    </button>
+    <span class="pagination-info">
+      ${start.toLocaleString()}–${end.toLocaleString()} of <strong>${total.toLocaleString()}</strong> leads
+      &nbsp;·&nbsp; Page ${page + 1} of ${totalPages}
+    </span>
+    <button class="btn btn-ghost pagination-btn" id="pageNext" ${page >= totalPages - 1 ? 'disabled' : ''}>
+      Next <i data-lucide="chevron-right"></i>
+    </button>
+  `;
+  lucide.createIcons();
+
+  document.getElementById('pagePrev')?.addEventListener('click', () => {
+    if (state.currentPage > 0) { state.currentPage--; loadLeads(); }
+  });
+  document.getElementById('pageNext')?.addEventListener('click', () => {
+    if (state.currentPage < totalPages - 1) { state.currentPage++; loadLeads(); }
+  });
 }
 
 function openLeadDrawerById(id) {
@@ -425,9 +525,13 @@ document.getElementById('whatsappForm').addEventListener('submit', async e => {
 let searchTimer;
 document.getElementById('searchInput').addEventListener('input', () => {
   clearTimeout(searchTimer);
+  state.currentPage = 0;
   searchTimer = setTimeout(loadLeads, 300);
 });
-document.getElementById('campaignFilterSelect').addEventListener('change', loadLeads);
+document.getElementById('campaignFilterSelect').addEventListener('change', () => {
+  state.currentPage = 0;
+  loadLeads();
+});
 
 // ─── Export ───────────────────────────────────────────────────────
 document.getElementById('exportBtn').addEventListener('click', () => {
@@ -637,45 +741,51 @@ async function loadIntegrations() {
   if (!state.token || !state.user || state.user.role !== 'admin') return;
   try {
     const list = document.getElementById('integrationList');
-    
-    // Fetch connected pages from backend
-    // Since we don't have a specific GET /meta/pages endpoint right now, we can check if there's any connection
-    // We should ideally have an endpoint to list pages. Wait, we don't.
-    // I can fetch org settings to see if it's connected, or just show a connected status.
-    
-    // For now, let's just show a simple status based on a query param or placeholder.
-    // If we want to be exact, we'd add an endpoint for it. Let's assume we can hit `/org/settings`
-    // Actually, we removed meta_page_id from org/settings. So let's check connection status via a new endpoint or just display generic state.
-    
-    // Let's implement a quick mock/UI for the integration list
-    list.innerHTML = `
-      <!-- We will populate this dynamically if we had a /meta/pages endpoint -->
-    `;
-    
-    // Connection status badge on sidebar
-    // We can assume it's connected if we have meta_connected=true in URL (for demo purposes)
-    const urlParams = new URLSearchParams(window.location.search);
-    const isConnected = urlParams.get('meta_connected') === 'true';
+    if (!list) return;
+    list.innerHTML = '';
     
     let html = '';
+    let isMetaConnected = false;
     
-    if (isConnected) {
-      html += `
-        <div class="integration-card">
-          <div class="integration-card-left">
-            <div class="integration-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1877F2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-facebook"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></div>
-            <div class="integration-info">
-              <h3>Facebook Lead Ads <span class="integration-status">Connected</span></h3>
-              <p>Receiving leads from your connected Facebook Pages</p>
+    // 1. Fetch Facebook Connections
+    try {
+      const fbConns = await api('/integrations/facebook/connections');
+      const fbConnectCard = document.getElementById('fbConnectCard');
+      if (fbConnectCard) {
+        fbConnectCard.style.display = fbConns.length > 0 ? 'none' : 'flex';
+      }
+      
+      if (fbConns && fbConns.length > 0) {
+        isMetaConnected = true;
+      }
+
+      fbConns.forEach(c => {
+        html += `
+          <div class="connect-new-card" style="border: 1px solid var(--accent);">
+            <div class="connect-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1877F2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-facebook"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></div>
+            <div class="connect-info">
+              <h3 style="display:flex; align-items:center; gap:8px;">Facebook Lead Ads <span class="pill active" style="font-size:10px;">✓ Connected</span></h3>
+              <p style="margin-bottom:8px;">Receiving leads from <strong>${esc(c.page_name)}</strong></p>
+              <div style="font-size:12px; color:var(--text-3);">
+                Lead Forms: ${c.connected_forms.length} connected
+              </div>
             </div>
+            <button class="btn btn-secondary" style="color: var(--red); border-color: var(--red);" onclick="disconnectMetaCard(${c.id})">
+              <i data-lucide="trash-2"></i> Remove
+            </button>
           </div>
-          <button class="btn btn-ghost" style="color:var(--red);" onclick="alert('Disconnect flow not implemented in demo')">Disconnect</button>
-        </div>
-      `;
-    }
+        `;
+      });
+    } catch(e) { console.error('FB Conns failed', e); }
     
+    // 2. Fetch Google Sheets Status
     try {
       const gsRes = await api('/integrations/google-sheets/status');
+      const gsConnectCard = document.getElementById('googleSheetsConnectCard');
+      if (gsConnectCard) {
+        gsConnectCard.style.display = (gsRes && gsRes.connected) ? 'none' : 'flex';
+      }
+
       if (gsRes && gsRes.connected) {
         html += `
           <div class="integration-card" style="margin-top:12px;">
@@ -683,7 +793,7 @@ async function loadIntegrations() {
               <div class="integration-icon"><i data-lucide="file-spreadsheet" style="color: #0F9D58;"></i></div>
               <div class="integration-info">
                 <h3>Google Sheets Sync <span class="integration-status">Active</span></h3>
-                <p>Syncing to <a href="${gsRes.spreadsheet_url}" target="_blank">Spreadsheet</a> (${gsRes.sheet_name})</p>
+                <p>Syncing to <a href="${esc(gsRes.spreadsheet_url)}" target="_blank">Spreadsheet</a> (${esc(gsRes.sheet_name)})</p>
               </div>
             </div>
             <button class="btn btn-ghost" style="color:var(--red);" id="btnDisconnectGs">Disconnect</button>
@@ -711,80 +821,11 @@ async function loadIntegrations() {
 
     const dot = document.querySelector('.badge-dot');
     const statusText = document.getElementById('connectionStatus');
-    if (dot) { dot.className = `badge-dot ${isConnected ? 'connected' : 'disconnected'}`; }
-    if (statusText) statusText.textContent = isConnected ? 'Connected ✓' : 'Not Connected';
+    if (dot) { dot.className = `badge-dot ${isMetaConnected ? 'connected' : 'disconnected'}`; }
+    if (statusText) statusText.textContent = isMetaConnected ? 'Connected ✓' : 'Not Connected';
+
   } catch (err) { console.error('Integrations failed:', err); }
 }
-
-document.getElementById('btnConnectFacebook')?.addEventListener('click', async () => {
-  if (!state.token) return;
-  
-  try {
-    const res = await api('/integrations/facebook/auth-url');
-    if (res && res.url) {
-      // Open popup
-      const popup = window.open(res.url, 'fb_oauth', 'width=600,height=700');
-      
-      // Wait for message from popup
-      window.addEventListener('message', async function fbAuthListener(event) {
-        if (event.data && event.data.type === 'FB_OAUTH_SUCCESS') {
-          window.removeEventListener('message', fbAuthListener);
-          
-          try {
-            // 1. Exchange code
-            const exRes = await api('/integrations/facebook/exchange', {
-              method: 'POST',
-              body: JSON.stringify({ 
-                code: event.data.code,
-                redirect_uri: res.redirect_uri 
-              })
-            });
-            
-            const fbSessionToken = exRes.fb_session_token;
-            
-            // 2. Fetch pages
-            const pagesRes = await api(`/integrations/facebook/pages?fb_session_token=${fbSessionToken}`);
-            const pages = pagesRes.pages;
-            
-            if (!pages || pages.length === 0) {
-              toast("No Facebook Pages found for this account.", "error");
-              return;
-            }
-            
-            // 3. Just connect the first page for this demo, or we could show a modal
-            // Let's just auto-connect the first one for simplicity
-            const firstPage = pages[0];
-            
-            // Fetch forms for that page to connect
-            const formsRes = await api(`/integrations/facebook/pages/${firstPage.id}/forms?fb_session_token=${fbSessionToken}`);
-            const formIds = formsRes.forms ? formsRes.forms.map(f => f.id) : [];
-            
-            // Connect it
-            await api('/integrations/facebook/connect', {
-              method: 'POST',
-              body: JSON.stringify({
-                fb_session_token: fbSessionToken,
-                page_id: firstPage.id,
-                page_name: firstPage.name,
-                forms: formIds
-              })
-            });
-            
-            toast(`Successfully connected Facebook Page: ${firstPage.name}! ✓`);
-            
-            // Reload integrations UI
-            // Fake a page reload to URL with success param to re-trigger the UI
-            window.location.href = '/?meta_connected=true&pages=1';
-            
-          } catch (err) {
-            console.error(err);
-            toast("Failed to complete Facebook connection.", "error");
-          }
-        }
-      });
-    }
-  } catch (err) { console.error('[FbAutoConnect Error]', err); toast(err.message, 'error'); }
-});
 
 document.getElementById('btnConnectGoogleSheets')?.addEventListener('click', () => {
   if (!state.token) return;
@@ -965,9 +1006,14 @@ function copyText(elId) {
 async function loadAll() {
   updateUserUI();
   if (state.token) {
+    // Default to today's leads on every fresh load
+    const todayStr = toISODate(new Date());
+    state.dateFrom = todayStr;
+    state.dateTo   = todayStr;
+    state.activeChip = 'today';
     await loadCampaigns();
     await loadLeads();
-    await loadConnections();
+    await loadIntegrations();
   }
 }
 
@@ -976,45 +1022,7 @@ let tempFbSession = null;
 let tempFbPageId = null;
 let tempFbPageName = null;
 
-async function loadConnections() {
-  if (!state.token) return;
-  try {
-    const conns = await api('/integrations/facebook/connections');
-    const container = document.getElementById('integrationList');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    // Toggle the "Connect Facebook" card based on whether a connection exists
-    const fbConnectCard = document.getElementById('fbConnectCard');
-    if (fbConnectCard) {
-      fbConnectCard.style.display = conns.length > 0 ? 'none' : 'flex';
-    }
 
-    conns.forEach(c => {
-      const card = document.createElement('div');
-      card.className = 'connect-new-card';
-      card.style.border = '1px solid var(--accent)';
-      card.innerHTML = `
-        <div class="connect-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1877F2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-facebook"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></div>
-        <div class="connect-info">
-          <h3 style="display:flex; align-items:center; gap:8px;">Facebook Lead Ads <span class="pill active" style="font-size:10px;">✓ Connected</span></h3>
-          <p style="margin-bottom:8px;">Receiving leads from <strong>${esc(c.page_name)}</strong></p>
-          <div style="font-size:12px; color:var(--text-3);">
-            Lead Forms: ${c.connected_forms.length} connected
-          </div>
-        </div>
-        <button class="btn btn-secondary" style="color: var(--red); border-color: var(--red);" onclick="disconnectMetaCard(${c.id})">
-          <i data-lucide="trash-2"></i> Remove
-        </button>
-      `;
-      container.appendChild(card);
-    });
-    lucide.createIcons();
-  } catch(e) {
-    console.error('Failed to load connections:', e);
-  }
-}
 
 document.getElementById('btnConnectFacebook')?.addEventListener('click', async () => {
   try {
@@ -1151,7 +1159,7 @@ document.getElementById('btnCompleteFbConnect')?.addEventListener('click', async
     closeModal('fbFormsModal');
     toast('Facebook Page successfully connected! ✓', 'success');
     tempFbSession = null;
-    loadConnections();
+    loadIntegrations();
   } catch(err) {
     console.error('[CompleteFbConnect Error]', err);
     toast('Connection failed: ' + err.message, 'error');
@@ -1174,7 +1182,7 @@ function openManageMeta(connId, pageId, pageName, formsJson) {
         await api(`/integrations/facebook/connections/${connId}/disconnect`, { method: 'POST' });
         toast('Disconnected successfully', 'success');
         closeModal('manageMetaModal');
-        loadConnections();
+        loadIntegrations();
       } catch (e) {
         console.error('[Disconnect Error]', e);
         toast('Failed to disconnect: ' + e.message, 'error');
@@ -1189,7 +1197,7 @@ window.disconnectMetaCard = async function(connId) {
     try {
       await api(`/integrations/facebook/connections/${connId}/disconnect`, { method: 'POST' });
       toast('Facebook account disconnected successfully', 'success');
-      loadConnections();
+      loadIntegrations();
     } catch (e) {
       console.error('[DisconnectCard Error]', e);
       toast('Failed to disconnect: ' + e.message, 'error');
@@ -1217,10 +1225,26 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize Flatpickr calendars
   if (typeof flatpickr !== 'undefined') {
     flatpickr("#analyticsDateRange", { mode: "range", dateFormat: "Y-m-d" });
-    flatpickr("#leadsDateFilter", { 
-      mode: "range", 
-      dateFormat: "Y-m-d", 
-      onChange: filterAndRenderTable 
+    flatpickr("#leadsDateFilter", {
+      mode: "range",
+      dateFormat: "Y-m-d",
+      onChange: function(selectedDates, dateStr) {
+        if (selectedDates.length === 0) return;
+        // Deactivate chips
+        ['chipToday','chipYesterday','chipWeek','chipAll'].forEach(id => {
+          document.getElementById(id)?.classList.remove('active');
+        });
+        state.activeChip = null;
+        state.currentPage = 0;
+        if (selectedDates.length === 1) {
+          state.dateFrom = toISODate(selectedDates[0]);
+          state.dateTo   = toISODate(selectedDates[0]);
+        } else if (selectedDates.length === 2) {
+          state.dateFrom = toISODate(selectedDates[0]);
+          state.dateTo   = toISODate(selectedDates[1]);
+        }
+        loadLeads();
+      }
     });
   }
 

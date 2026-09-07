@@ -5,7 +5,7 @@ from datetime import datetime, date
 from typing import Optional, List
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -52,6 +52,11 @@ def list_leads(
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     campaign_id: Optional[int] = Query(None),
+    date_from: Optional[str] = Query(None, description="ISO date string YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="ISO date string YYYY-MM-DD"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    response: Response = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -69,7 +74,27 @@ def list_leads(
             (Lead.phone.ilike(p)) |
             (Lead.campaign_name.ilike(p))
         )
-    return query.order_by(Lead.created_at.desc()).all()
+    if date_from:
+        try:
+            d_from = datetime.strptime(date_from, "%Y-%m-%d")
+            query = query.filter(Lead.created_at >= d_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            d_to = datetime.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.filter(Lead.created_at <= d_to)
+        except ValueError:
+            pass
+
+    total = query.count()
+    leads = query.order_by(Lead.created_at.desc()).offset(offset).limit(limit).all()
+
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+
+    return leads
 
 
 @router.get("/stats", response_model=LeadStats)

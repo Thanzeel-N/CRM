@@ -188,10 +188,16 @@
       <div id="tab-table" class="tab-pane">
         <div class="section-head" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
           <h2>All Leads</h2>
-          <div style="display: flex; gap: 12px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <div class="date-quick-chips">
+              <button class="chip active" id="chipToday" onclick="setLeadDateChip('today')">Today</button>
+              <button class="chip" id="chipYesterday" onclick="setLeadDateChip('yesterday')">Yesterday</button>
+              <button class="chip" id="chipWeek" onclick="setLeadDateChip('week')">This Week</button>
+              <button class="chip" id="chipAll" onclick="setLeadDateChip('all')">All Leads</button>
+            </div>
             <div class="date-filter-group" style="display: flex; align-items: center; gap: 8px; background: var(--bg-sec); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);">
               <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);"></i>
-              <input type="text" id="leadsDateFilter" class="form-control" placeholder="Select Date(s)" style="border: none; background: transparent; padding: 4px; font-size: 13px; color: var(--text-main); width: 180px;">
+              <input type="text" id="leadsDateFilter" class="form-control" placeholder="Custom range…" style="border: none; background: transparent; padding: 4px; font-size: 13px; color: var(--text-main); width: 160px;">
             </div>
             <button class="btn btn-secondary" id="btnPrintLeads">
               <i data-lucide="printer"></i> Print List
@@ -202,13 +208,21 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>#</th><th>Lead</th><th>Contact</th><th>Campaign</th>
-                <th>Assigned To</th><th>Status</th><th>Received</th><th>Actions</th>
+                <th class="col-id">#</th>
+                <th>Lead</th>
+                <th class="col-contact">Contact</th>
+                <th class="col-campaign">Campaign</th>
+                <th class="col-form">Lead Form</th>
+                <th class="col-assigned">Assigned To</th>
+                <th>Status</th>
+                <th class="col-date">Received</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="leadsTableBody"></tbody>
           </table>
         </div>
+        <div id="leadsTablePagination" class="pagination-bar"></div>
       </div>
 
       <!-- ── TAB: ANALYTICS ── -->

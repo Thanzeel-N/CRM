@@ -433,13 +433,12 @@ strong { font-weight:600; }
 .metric-info p  { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
 .metric-info h2 { font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; }
 
-/* ─── Section Header ─────────────────────────────────────────── */
+/* ─── Layout & Sections ──────────────────────────────────────────── */
 .section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: 20px;
-  gap: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .section-head h2 { font-size: 18px; }
 .hint { font-size: 12px; color: var(--text-3); }
@@ -538,13 +537,18 @@ strong { font-weight:600; }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
-  overflow: hidden;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: calc(100vh - 280px);
 }
 .data-table {
   width: 100%;
   border-collapse: collapse;
   white-space: nowrap;
+}
+.data-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 .data-table th {
   padding: 13px 18px;
@@ -566,6 +570,38 @@ strong { font-weight:600; }
 }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: var(--glass); }
+
+/* Pagination */
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-sec);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
+}
+.pagination-info {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.pagination-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pagination-btn[disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.pagination-btn i {
+  width: 14px;
+  height: 14px;
+}
 
 /* Status Pills */
 .pill {
@@ -901,6 +937,8 @@ select.form-control { cursor: pointer; appearance: auto; }
   .kanban-board        { grid-template-columns: repeat(3, minmax(200px, 1fr)); overflow-x: auto; }
   .charts-grid         { grid-template-columns: 1fr; }
   .simulator-layout    { grid-template-columns: 1fr; }
+  
+  .col-assigned { display: none; }
 }
 
 /* ─── Mobile (≤ 900px) ───────────────────────────────────────────── */
@@ -954,6 +992,8 @@ select.form-control { cursor: pointer; appearance: auto; }
 
   /* Modal box full width */
   .modal-box { padding: 16px; }
+  
+  .col-form { display: none; }
 }
 
 /* ─── Small Mobile (≤ 600px) ─────────────────────────────────────── */
@@ -1041,6 +1081,9 @@ select.form-control { cursor: pointer; appearance: auto; }
 @media (max-width: 400px) {
   .metrics-grid { grid-template-columns: 1fr; }
   .kanban-col { min-width: 200px; }
+  
+  .col-campaign { display: none; }
+  .col-id { display: none; }
 }
 
 /* ─── Print ─── */
@@ -1057,3 +1100,31 @@ select.form-control { cursor: pointer; appearance: auto; }
   .section-head .date-filter-group { display: none !important; }
 }
 
+/* --- Quick Chips -------------------------------------------------- */
+.date-quick-chips {
+  display: flex;
+  gap: 6px;
+  background: var(--bg-sec);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.date-quick-chips .chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.date-quick-chips .chip:hover {
+  color: var(--text-main);
+  background: var(--glass);
+}
+.date-quick-chips .chip.active {
+  color: #fff;
+  background: var(--accent);
+}
