@@ -47,6 +47,19 @@ def _base_lead_query(db: Session, current_user: User):
     return q
 
 
+@router.get("/forms", response_model=List[str])
+def list_lead_forms(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return a list of unique form names/IDs associated with this org's leads."""
+    forms = db.query(Lead.form_name).filter(
+        Lead.org_id == current_user.org_id,
+        Lead.form_name != None
+    ).distinct().all()
+    
+    return [f[0] for f in forms if f[0]]
+
 @router.get("", response_model=List[LeadOut])
 def list_leads(
     status: Optional[str] = Query(None),
