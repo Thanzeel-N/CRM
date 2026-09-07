@@ -156,10 +156,22 @@ async def receive_meta_lead(
             fields = parse_field_data(details.get("field_data", []))
             form_id = details.get("form_id")
 
-            # Skip if form is not in the connected forms list (empty list = accept all)
-            if conn and connected_forms and form_id not in connected_forms:
-                logger.debug("Lead form %s not in connected forms for org %s — skipping", form_id, org_id)
-                continue
+            # Check if form is in connected forms (matching by string or dict id)
+            form_id_str = str(form_id) if form_id else ""
+            if conn and connected_forms:
+                connected_ids = [str(f.get("id") if isinstance(f, dict) else f) for f in connected_forms]
+                if connected_ids and form_id_str not in connected_ids:
+                    logger.debug("Lead form %s not in connected forms for org %s — skipping", form_id, org_id)
+                    continue
+
+            # Resolve human-readable form name
+            resolved_form_name = form_id_str
+            if conn and connected_forms:
+                for f in connected_forms:
+                    if isinstance(f, dict) and str(f.get("id")) == form_id_str:
+                        resolved_form_name = f.get("name") or form_id_str
+                        break
+
             created_at_val = None
             if "created_time" in details:
                 try:
@@ -174,7 +186,7 @@ async def receive_meta_lead(
                 email=fields.get("email"),
                 phone=fields.get("phone_number"),
                 campaign_name=details.get("campaign_name"),
-                form_name=details.get("form_id"),
+                form_name=resolved_form_name,
                 raw_data=details,
                 created_at=created_at_val
             )

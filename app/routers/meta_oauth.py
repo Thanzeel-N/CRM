@@ -278,9 +278,23 @@ async def connect_page(
                 logger.error(f"Webhook subscription failed for page {page_id}: {err_msg}")
                 raise HTTPException(status_code=400, detail=f"Webhook subscription failed: {err_msg}")
             
+            forms_meta = []
+            clean_form_ids = []
+            form_map = {}
+            for item in forms:
+                if isinstance(item, dict):
+                    fid = str(item.get("id"))
+                    fname = item.get("name") or f"Form #{fid}"
+                else:
+                    fid = str(item)
+                    fname = f"Form #{fid}"
+                clean_form_ids.append(fid)
+                forms_meta.append({"id": fid, "name": fname})
+                form_map[fid] = fname
+
             # 3. Historical Lead Sync
             seen_lead_ids = set()
-            for form_id in forms:
+            for form_id in clean_form_ids:
                 url_leads = f"{FB_API_BASE}/{form_id}/leads"
                 params_leads = {
                     "access_token": page_access_token,
@@ -324,6 +338,9 @@ async def connect_page(
                                 except Exception:
                                     pass
                             
+                            target_form_id = str(l.get("form_id") or form_id)
+                            resolved_form_name = form_map.get(target_form_id, f"Form #{target_form_id}")
+
                             new_lead = Lead(
                                 org_id=current_user.org_id,
                                 fb_lead_id=fb_lead_id,
@@ -331,7 +348,7 @@ async def connect_page(
                                 email=fields.get("email"),
                                 phone=fields.get("phone_number"),
                                 campaign_name=l.get("campaign_name"),
-                                form_name=l.get("form_id"),
+                                form_name=resolved_form_name,
                                 raw_data=l,
                                 created_at=created_at_val
                             )
@@ -362,7 +379,7 @@ async def connect_page(
     if conn:
         conn.page_name = page_name
         conn.access_token = page_access_token
-        conn.connected_forms = forms
+        conn.connected_forms = forms_meta if 'forms_meta' in locals() else forms
         conn.status = "active"
     else:
         conn = MetaPageConnection(
@@ -371,7 +388,7 @@ async def connect_page(
             page_id=page_id,
             page_name=page_name,
             access_token=page_access_token,
-            connected_forms=forms,
+            connected_forms=forms_meta if 'forms_meta' in locals() else forms,
             status="active"
         )
         db.add(conn)

@@ -342,9 +342,11 @@ async function loadStats() {
       while (formSel.options.length > 1) formSel.remove(1);
       forms.forEach(f => {
         const opt = document.createElement('option');
-        opt.value = f;
-        opt.textContent = f;
-        if (f === currentForm) opt.selected = true;
+        const fVal = typeof f === 'object' ? (f.name || f.id) : f;
+        const fName = typeof f === 'object' ? (f.name || f.id) : f;
+        opt.value = fVal;
+        opt.textContent = fName;
+        if (fVal === currentForm) opt.selected = true;
         formSel.appendChild(opt);
       });
     } catch (e) { console.error('Forms fetch failed', e); }
@@ -430,15 +432,19 @@ function renderTable(leads, total) {
       <th class="col-date">Date Received</th>
     `;
     dynamicCols.forEach(col => {
-      headerHtml += `<th class="col-dynamic">${esc(col)}</th>`;
+      const label = col.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+      headerHtml += `<th class="col-dynamic" title="${esc(col)}">${esc(label)}</th>`;
     });
     headerHtml += `<th>Action</th>`;
     thead.innerHTML = headerHtml;
   }
 
   if (!leads.length) {
-    const msg = (state.dateFrom || state.dateTo)
-      ? `No leads found for the selected date range.`
+    const search = document.getElementById('searchInput')?.value.trim();
+    const campaign = document.getElementById('campaignFilterSelect')?.value;
+    const isFiltered = state.dateFrom || state.dateTo || selectedForm || search || campaign;
+    const msg = isFiltered
+      ? `No leads found matching current filter criteria.`
       : `No leads found.`;
     tbody.innerHTML = `<tr><td colspan="${9 + dynamicCols.length}" style="text-align:center;padding:40px;color:var(--text-3);">${msg}</td></tr>`;
     return;
@@ -1373,6 +1379,32 @@ document.addEventListener('DOMContentLoaded', () => {
           sidebarBackdrop.classList.remove('active');
         }
       });
+    });
+  // Filter change listeners
+  const campaignSel = document.getElementById('campaignFilterSelect');
+  const formSel = document.getElementById('formFilterSelect');
+  const searchInput = document.getElementById('searchInput');
+
+  if (campaignSel) {
+    campaignSel.addEventListener('change', () => {
+      state.currentPage = 0;
+      loadLeads();
+    });
+  }
+  if (formSel) {
+    formSel.addEventListener('change', () => {
+      state.currentPage = 0;
+      loadLeads();
+    });
+  }
+  if (searchInput) {
+    let searchDebounce = null;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        state.currentPage = 0;
+        loadLeads();
+      }, 300);
     });
   }
 
