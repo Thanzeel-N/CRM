@@ -48,34 +48,77 @@ def _base_lead_query(db: Session, current_user: User):
 
 
 @router.get("/forms")
-def list_lead_forms(
+async def list_lead_forms(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Return a list of unique form details/names associated with this org's leads and connections."""
     from app.models import MetaPageConnection
-    
-    # 1. Gather form_id -> form_name map from Meta connections
+    import httpx
+
+    # 1. Gather form_id -> form_name map from Meta connections & Graph API
     form_map = {}
     conns = db.query(MetaPageConnection).filter(
-        MetaPageConnection.org_id == current_user.org_id
+        MetaPageConnection.org_id == current_user.org_id,
+        MetaPageConnection.status == "active"
     ).all()
-    for c in conns:
-        if c.connected_forms and isinstance(c.connected_forms, list):
-            for item in c.connected_forms:
-                if isinstance(item, dict) and item.get("id") and item.get("name"):
-                    form_map[str(item["id"])] = item["name"]
 
-    # 2. Backfill existing leads where form_name is raw form ID or created_at needs exact timestamp
+    async with httpx.AsyncClient() as client:
+        for c in conns:
+            page_forms_meta = []
+            if c.connected_forms and isinstance(c.connected_forms, list):
+                for item in c.connected_forms:
+                    if isinstance(item, dict) and item.get("id") and item.get("name"):
+                        form_map[str(item["id"])] = item["name"]
+                        page_forms_meta.append(item)
+
+            # Query Graph API if form_map is incomplete for this page connection
+            if c.access_token and c.page_id:
+                try:
+                    url_forms = f"https://graph.facebook.com/v20.0/{c.page_id}/leadgen_forms"
+                    resp = await client.get(url_forms, params={"access_token": c.access_token, "fields": "id,name"})
+                    data = resp.json()
+                    if "data" in data:
+                        for f in data["data"]:
+                            fid = str(f["id"])
+                            fname = f.get("name") or f"Form #{fid}"
+                            form_map[fid] = fname
+                            if not any(isinstance(p, dict) and p.get("id") == fid for p in page_forms_meta):
+                                page_forms_meta.append({"id": fid, "name": fname})
+                        c.connected_forms = page_forms_meta
+                        db.commit()
+                except Exception:
+                    pass
+
+        # Fallback for remaining unresolved numeric form IDs in DB
+        unresolved_ids = set()
+        for l in db.query(Lead.form_name).filter(Lead.org_id == current_user.org_id).distinct().all():
+            val = l[0]
+            if val and val.isdigit() and val not in form_map:
+                unresolved_ids.add(val)
+
+        if unresolved_ids and conns:
+            token = conns[0].access_token
+            for fid in unresolved_ids:
+                try:
+                    resp = await client.get(f"https://graph.facebook.com/v20.0/{fid}", params={"access_token": token, "fields": "name"})
+                    fname = resp.json().get("name")
+                    if fname:
+                        form_map[fid] = fname
+                except Exception:
+                    pass
+
+    # 2. Backfill existing leads where form_name is raw numeric form ID
     if form_map:
         numeric_leads = db.query(Lead).filter(
-            Lead.org_id == current_user.org_id,
-            Lead.form_name.in_(list(form_map.keys()))
+            Lead.org_id == current_user.org_id
         ).all()
-        if numeric_leads:
-            for l in numeric_leads:
-                if l.form_name in form_map:
-                    l.form_name = form_map[l.form_name]
+        updated_forms = False
+        for l in numeric_leads:
+            if l.form_name and l.form_name in form_map:
+                l.form_name = form_map[l.form_name]
+                updated_forms = True
+        if updated_forms:
             db.commit()
 
     # 2.5 Backfill created_at from raw_data if available
@@ -97,7 +140,7 @@ def list_lead_forms(
                     pass
         if date_updated:
             db.commit()
-    except Exception as ex:
+    except Exception:
         pass
 
     # 3. Query distinct form names
@@ -105,7 +148,7 @@ def list_lead_forms(
         Lead.org_id == current_user.org_id,
         Lead.form_name != None
     ).distinct().all()
-    
+
     result = []
     seen = set()
     for f in forms_db:
