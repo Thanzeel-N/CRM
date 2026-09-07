@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import dateutil.parser
 
 import gspread
 from fastapi import APIRouter, Request, Response, Depends, HTTPException, BackgroundTasks
@@ -159,6 +160,12 @@ async def receive_meta_lead(
             if conn and connected_forms and form_id not in connected_forms:
                 logger.debug("Lead form %s not in connected forms for org %s — skipping", form_id, org_id)
                 continue
+            created_at_val = None
+            if "created_time" in details:
+                try:
+                    created_at_val = dateutil.parser.parse(details["created_time"])
+                except Exception:
+                    pass
 
             lead = Lead(
                 org_id=org_id,
@@ -169,6 +176,7 @@ async def receive_meta_lead(
                 campaign_name=details.get("campaign_name"),
                 form_name=details.get("form_id"),
                 raw_data=details,
+                created_at=created_at_val
             )
             db.add(lead)
             db.commit()

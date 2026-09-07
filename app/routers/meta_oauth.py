@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 import httpx
 import jwt
+import dateutil.parser
 from datetime import datetime, timedelta
 
 import logging
@@ -316,6 +317,13 @@ async def connect_page(
                                 
                             fields = parse_field_data(l.get("field_data", []))
                             
+                            created_at_val = None
+                            if "created_time" in l:
+                                try:
+                                    created_at_val = dateutil.parser.parse(l["created_time"])
+                                except Exception:
+                                    pass
+                            
                             new_lead = Lead(
                                 org_id=current_user.org_id,
                                 fb_lead_id=fb_lead_id,
@@ -324,7 +332,8 @@ async def connect_page(
                                 phone=fields.get("phone_number"),
                                 campaign_name=l.get("campaign_name"),
                                 form_name=l.get("form_id"),
-                                raw_data=l
+                                raw_data=l,
+                                created_at=created_at_val
                             )
                             db.add(new_lead)
                             seen_lead_ids.add(fb_lead_id)
@@ -382,6 +391,11 @@ def list_connections(current_user: User = Depends(get_current_user), db: Session
         MetaPageConnection.org_id == current_user.org_id
     ).order_by(MetaPageConnection.created_at.desc()).all()
     
+    unique_conns = {}
+    for c in conns:
+        if c.page_id not in unique_conns:
+            unique_conns[c.page_id] = c
+            
     return [
         {
             "id": c.id,
@@ -390,7 +404,7 @@ def list_connections(current_user: User = Depends(get_current_user), db: Session
             "connected_forms": c.connected_forms,
             "status": c.status,
             "created_at": c.created_at
-        } for c in conns
+        } for c in unique_conns.values()
     ]
 
 @router.post("/connections/{conn_id}/disconnect")

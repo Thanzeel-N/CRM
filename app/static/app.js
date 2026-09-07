@@ -285,8 +285,10 @@ async function loadLeads() {
     const params = new URLSearchParams();
     const search = document.getElementById('searchInput').value.trim();
     const campaign = document.getElementById('campaignFilterSelect').value;
+    const formName = document.getElementById('formFilterSelect').value;
     if (search)   params.append('search', search);
     if (campaign) params.append('campaign_id', campaign);
+    if (formName) params.append('form_name', formName);
     if (state.dateFrom) params.append('date_from', state.dateFrom);
     if (state.dateTo)   params.append('date_to',   state.dateTo);
     params.append('limit',  state.pageSize);
@@ -331,6 +333,22 @@ async function loadStats() {
       if (String(c.id) === current) opt.selected = true;
       sel.appendChild(opt);
     });
+
+    // Populate form filter
+    try {
+      const forms = await api('/leads/forms') || [];
+      const formSel = document.getElementById('formFilterSelect');
+      const currentForm = formSel.value;
+      while (formSel.options.length > 1) formSel.remove(1);
+      forms.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = f;
+        if (f === currentForm) opt.selected = true;
+        formSel.appendChild(opt);
+      });
+    } catch (e) { console.error('Forms fetch failed', e); }
+
   } catch (err) { console.error('Stats failed:', err); }
 }
 
@@ -381,13 +399,51 @@ function filterAndRenderTable() {
 
 function renderTable(leads, total) {
   const tbody = document.getElementById('leadsTableBody');
+  const thead = document.querySelector('.data-table thead tr');
+  const selectedForm = document.getElementById('formFilterSelect').value;
+
+  // Determine dynamic columns based on selected form
+  let dynamicCols = [];
+  if (selectedForm && leads.length > 0) {
+    leads.forEach(l => {
+      if (l.raw_data && l.raw_data.field_data) {
+        l.raw_data.field_data.forEach(fd => {
+          const n = fd.name;
+          if (n !== 'email' && n !== 'full_name' && n !== 'phone_number' && n !== 'name') {
+            if (!dynamicCols.includes(n)) dynamicCols.push(n);
+          }
+        });
+      }
+    });
+  }
+
+  // Update table header
+  if (thead) {
+    let headerHtml = `
+      <th class="col-id">#</th>
+      <th>Lead</th>
+      <th class="col-contact">Contact</th>
+      <th class="col-campaign">Campaign</th>
+      <th class="col-form">Lead Form</th>
+      <th class="col-assigned">Assigned To</th>
+      <th>Status</th>
+      <th class="col-date">Date Received</th>
+    `;
+    dynamicCols.forEach(col => {
+      headerHtml += `<th class="col-dynamic">${esc(col)}</th>`;
+    });
+    headerHtml += `<th>Action</th>`;
+    thead.innerHTML = headerHtml;
+  }
+
   if (!leads.length) {
     const msg = (state.dateFrom || state.dateTo)
       ? `No leads found for the selected date range.`
       : `No leads found.`;
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-3);">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${9 + dynamicCols.length}" style="text-align:center;padding:40px;color:var(--text-3);">${msg}</td></tr>`;
     return;
   }
+  
   tbody.innerHTML = leads.map(l => {
     const dt = l.created_at ? new Date(l.created_at) : null;
     const dateStr = dt ? dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
@@ -396,7 +452,8 @@ function renderTable(leads, total) {
     const assignee = campaign?.assigned_user_name || l.campaign_name ? (campaign?.assigned_user_name || '—') : '—';
     const formName = l.form_name || '—';
     const statusClass = l.status.replace(' ', '-');
-    return `
+
+    let rowHtml = `
       <tr>
         <td class="col-id" style="color:var(--text-3);font-size:11px;">#${l.id}</td>
         <td><strong>${esc(l.name || '—')}</strong></td>
@@ -411,12 +468,28 @@ function renderTable(leads, total) {
             <span style="color:var(--text-3);font-size:11px;">${timeStr}</span>
           </div>
         </td>
+    `;
+
+    dynamicCols.forEach(col => {
+      let val = '—';
+      if (l.raw_data && l.raw_data.field_data) {
+        const field = l.raw_data.field_data.find(f => f.name === col);
+        if (field && field.values && field.values.length > 0) {
+          val = field.values.join(', ');
+        }
+      }
+      rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);">${esc(val)}</td>`;
+    });
+
+    rowHtml += `
         <td>
           <button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;" onclick="openLeadDrawerById(${l.id})">
             Open
           </button>
         </td>
-      </tr>`;
+      </tr>
+    `;
+    return rowHtml;
   }).join('');
 }
 
@@ -550,6 +623,10 @@ document.getElementById('searchInput').addEventListener('input', () => {
   searchTimer = setTimeout(loadLeads, 300);
 });
 document.getElementById('campaignFilterSelect').addEventListener('change', () => {
+  state.currentPage = 0;
+  loadLeads();
+});
+document.getElementById('formFilterSelect').addEventListener('change', () => {
   state.currentPage = 0;
   loadLeads();
 });
