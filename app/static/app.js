@@ -454,51 +454,58 @@ function renderTable(leads, total) {
   }
   
   tbody.innerHTML = leads.map(l => {
-    const dt = l.created_at ? new Date(l.created_at) : null;
-    const dateStr = dt ? dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
-    const timeStr = dt ? dt.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12: true }) : '';
-    const campaign = state.campaigns.find(c => c.id === l.campaign_id);
-    const assignee = campaign?.assigned_user_name || l.campaign_name ? (campaign?.assigned_user_name || '—') : '—';
-    const formName = l.form_name || '—';
-    const statusClass = l.status.replace(' ', '-');
+    try {
+      const dt = l.created_at ? new Date(l.created_at) : null;
+      const isValidDt = dt && !isNaN(dt.getTime());
+      const dateStr = isValidDt ? dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+      const timeStr = isValidDt ? dt.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12: true }) : '';
+      const campaign = state.campaigns.find(c => c.id === l.campaign_id);
+      const assignee = campaign?.assigned_user_name || '—';
+      const formName = l.form_name || '—';
+      const statusText = String(l.status || 'new');
+      const statusClass = statusText.replace(/ /g, '-');
 
-    let rowHtml = `
-      <tr>
-        <td class="col-id" style="color:var(--text-3);font-size:11px;">#${l.id}</td>
-        <td><strong>${esc(l.name || '—')}</strong></td>
-        <td class="col-contact"><div style="font-size:12px;color:var(--text-2);line-height:1.6;">${esc(l.email || '—')}<br>${esc(l.phone || '')}</div></td>
-        <td class="col-campaign"><span class="lead-tag">${esc(l.campaign_name || '—')}</span></td>
-        <td class="col-form" style="font-size:12px;color:var(--text-2);">${esc(formName)}</td>
-        <td class="col-assigned" style="font-size:12px;color:var(--text-2);">${esc(assignee)}</td>
-        <td><span class="pill ${statusClass}">${l.status}</span></td>
-        <td class="col-date">
-          <div style="font-size:12px;color:var(--text-2);line-height:1.6;">
-            ${dateStr}<br>
-            <span style="color:var(--text-3);font-size:11px;">${timeStr}</span>
-          </div>
-        </td>
-    `;
+      let rowHtml = `
+        <tr>
+          <td class="col-id" style="color:var(--text-3);font-size:11px;">#${l.id || ''}</td>
+          <td><strong>${esc(l.name || '—')}</strong></td>
+          <td class="col-contact"><div style="font-size:12px;color:var(--text-2);line-height:1.6;">${esc(l.email || '—')}<br>${esc(l.phone || '')}</div></td>
+          <td class="col-campaign"><span class="lead-tag">${esc(l.campaign_name || '—')}</span></td>
+          <td class="col-form" style="font-size:12px;color:var(--text-2);">${esc(formName)}</td>
+          <td class="col-assigned" style="font-size:12px;color:var(--text-2);">${esc(assignee)}</td>
+          <td><span class="pill ${statusClass}">${esc(statusText)}</span></td>
+          <td class="col-date">
+            <div style="font-size:12px;color:var(--text-2);line-height:1.6;">
+              ${dateStr}<br>
+              <span style="color:var(--text-3);font-size:11px;">${timeStr}</span>
+            </div>
+          </td>
+      `;
 
-    dynamicCols.forEach(col => {
-      let val = '—';
-      if (l.raw_data && l.raw_data.field_data) {
-        const field = l.raw_data.field_data.find(f => f.name === col);
-        if (field && field.values && field.values.length > 0) {
-          val = field.values.join(', ');
+      dynamicCols.forEach(col => {
+        let val = '—';
+        if (l.raw_data && l.raw_data.field_data && Array.isArray(l.raw_data.field_data)) {
+          const field = l.raw_data.field_data.find(f => f.name === col);
+          if (field && field.values && Array.isArray(field.values) && field.values.length > 0) {
+            val = field.values.join(', ');
+          }
         }
-      }
-      rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);">${esc(val)}</td>`;
-    });
+        rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);">${esc(val)}</td>`;
+      });
 
-    rowHtml += `
-        <td>
-          <button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;" onclick="openLeadDrawerById(${l.id})">
-            Open
-          </button>
-        </td>
-      </tr>
-    `;
-    return rowHtml;
+      rowHtml += `
+          <td>
+            <button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;" onclick="openLeadDrawerById(${l.id})">
+              Open
+            </button>
+          </td>
+        </tr>
+      `;
+      return rowHtml;
+    } catch (err) {
+      console.error('[renderTable] Failed to render row for lead ID:', l?.id, err);
+      return '';
+    }
   }).join('');
 }
 
