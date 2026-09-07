@@ -148,7 +148,7 @@ def list_leads(
             pass
 
     total = query.count()
-    leads = query.order_by(Lead.created_at.desc()).offset(offset).limit(limit).all()
+    leads = query.order_by(Lead.created_at.desc().nullslast(), Lead.id.desc()).offset(offset).limit(limit).all()
 
     if response is not None:
         response.headers["X-Total-Count"] = str(total)
