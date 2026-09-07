@@ -325,17 +325,22 @@ async function loadStats() {
     document.getElementById('statConversionRate').textContent = stats.conversion_rate != null ? `${stats.conversion_rate}%` : '—';
 
     // Populate campaign filter
-    const sel = document.getElementById('campaignFilterSelect');
-    const current = sel.value;
-    // Clear options except first
-    while (sel.options.length > 1) sel.remove(1);
-    state.campaigns.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = c.name;
-      if (String(c.id) === current) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    try {
+      const campData = await api('/leads/campaigns') || [];
+      const sel = document.getElementById('campaignFilterSelect');
+      const current = sel.value;
+      // Clear options except first
+      while (sel.options.length > 1) sel.remove(1);
+      campData.forEach(c => {
+        const opt = document.createElement('option');
+        const cVal = typeof c === 'object' ? (c.name || c.id) : c;
+        const cName = typeof c === 'object' ? (c.name || c.id) : c;
+        opt.value = cVal;
+        opt.textContent = cName;
+        if (String(cVal) === current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch (e) { console.error('Campaign filter load failed', e); }
 
     // Populate form filter
     try {

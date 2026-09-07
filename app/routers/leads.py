@@ -143,6 +143,26 @@ async def list_lead_forms(
     except Exception:
         pass
 
+    # 2.7 Deduplicate leads by fb_lead_id
+    try:
+        from sqlalchemy import func
+        # Find duplicates
+        dupes = db.query(Lead.fb_lead_id, func.min(Lead.id).label('min_id')).filter(
+            Lead.org_id == current_user.org_id,
+            Lead.fb_lead_id != None
+        ).group_by(Lead.fb_lead_id).having(func.count(Lead.fb_lead_id) > 1).all()
+        
+        if dupes:
+            for fb_id, min_id in dupes:
+                db.query(Lead).filter(
+                    Lead.org_id == current_user.org_id,
+                    Lead.fb_lead_id == fb_id,
+                    Lead.id != min_id
+                ).delete()
+            db.commit()
+    except Exception:
+        pass
+
     # 3. Query distinct form names
     forms_db = db.query(Lead.form_name).filter(
         Lead.org_id == current_user.org_id,
@@ -165,11 +185,44 @@ async def list_lead_forms(
 
     return result
 
+@router.get("/campaigns")
+def list_lead_campaigns(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    campaigns_db = db.query(Lead.campaign_name).filter(
+        Lead.org_id == current_user.org_id,
+        Lead.campaign_name != None,
+        Lead.campaign_name != ""
+    ).distinct().all()
+    
+    result = []
+    seen = set()
+    for c in campaigns_db:
+        val = c[0]
+        if val and val not in seen:
+            seen.add(val)
+            result.append({"id": val, "name": val})
+            
+    # Also add manually created campaigns
+    from app.models import Campaign
+    manual_campaigns = db.query(Campaign).filter(
+        Campaign.org_id == current_user.org_id,
+        Campaign.is_active == True
+    ).all()
+    
+    for mc in manual_campaigns:
+        if mc.name not in seen:
+            seen.add(mc.name)
+            result.append({"id": mc.id, "name": mc.name})
+            
+    return result
+
 @router.get("", response_model=List[LeadOut])
 def list_leads(
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    campaign_id: Optional[int] = Query(None),
+    campaign_id: Optional[str] = Query(None),
     form_name: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None, description="ISO date string YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="ISO date string YYYY-MM-DD"),
@@ -184,7 +237,11 @@ def list_leads(
     if status:
         query = query.filter(Lead.status == status)
     if campaign_id:
-        query = query.filter(Lead.campaign_id == campaign_id)
+        from sqlalchemy import or_
+        filters = [Lead.campaign_name.ilike(f"%{campaign_id}%"), Lead.campaign_name == campaign_id]
+        if campaign_id.isdigit():
+            filters.append(Lead.campaign_id == int(campaign_id))
+        query = query.filter(or_(*filters))
     if form_name:
         query = query.filter(
             (Lead.form_name == form_name) |
