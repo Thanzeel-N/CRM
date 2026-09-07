@@ -201,14 +201,14 @@ def list_leads(
         )
     if date_from:
         try:
-            d_from = datetime.strptime(date_from, "%Y-%m-%d")
-            query = query.filter(Lead.created_at >= d_from)
+            d_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+            query = query.filter(func.date(Lead.created_at) >= d_from)
         except ValueError:
             pass
     if date_to:
         try:
-            d_to = datetime.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-            query = query.filter(Lead.created_at <= d_to)
+            d_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+            query = query.filter(func.date(Lead.created_at) <= d_to)
         except ValueError:
             pass
 
