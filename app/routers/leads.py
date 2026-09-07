@@ -47,24 +47,65 @@ def _base_lead_query(db: Session, current_user: User):
     return q
 
 
-@router.get("/forms", response_model=List[str])
+@router.get("/forms")
 def list_lead_forms(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Return a list of unique form names/IDs associated with this org's leads."""
-    forms = db.query(Lead.form_name).filter(
+    """Return a list of unique form details/names associated with this org's leads and connections."""
+    from app.models import MetaPageConnection
+    
+    # 1. Gather form_id -> form_name map from Meta connections
+    form_map = {}
+    conns = db.query(MetaPageConnection).filter(
+        MetaPageConnection.org_id == current_user.org_id
+    ).all()
+    for c in conns:
+        if c.connected_forms and isinstance(c.connected_forms, list):
+            for item in c.connected_forms:
+                if isinstance(item, dict) and item.get("id") and item.get("name"):
+                    form_map[str(item["id"])] = item["name"]
+
+    # 2. Backfill existing leads where form_name is raw form ID
+    if form_map:
+        numeric_leads = db.query(Lead).filter(
+            Lead.org_id == current_user.org_id,
+            Lead.form_name.in_(list(form_map.keys()))
+        ).all()
+        if numeric_leads:
+            for l in numeric_leads:
+                if l.form_name in form_map:
+                    l.form_name = form_map[l.form_name]
+            db.commit()
+
+    # 3. Query distinct form names
+    forms_db = db.query(Lead.form_name).filter(
         Lead.org_id == current_user.org_id,
         Lead.form_name != None
     ).distinct().all()
     
-    return [f[0] for f in forms if f[0]]
+    result = []
+    seen = set()
+    for f in forms_db:
+        val = f[0]
+        if val and val not in seen:
+            seen.add(val)
+            result.append({"id": val, "name": val})
+
+    # Also add forms from active page connections if not already in leads
+    for fid, fname in form_map.items():
+        if fname not in seen:
+            seen.add(fname)
+            result.append({"id": fid, "name": fname})
+
+    return result
 
 @router.get("", response_model=List[LeadOut])
 def list_leads(
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     campaign_id: Optional[int] = Query(None),
+    form_name: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None, description="ISO date string YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="ISO date string YYYY-MM-DD"),
     limit: int = Query(100, ge=1, le=500),
@@ -79,13 +120,19 @@ def list_leads(
         query = query.filter(Lead.status == status)
     if campaign_id:
         query = query.filter(Lead.campaign_id == campaign_id)
+    if form_name:
+        query = query.filter(
+            (Lead.form_name == form_name) |
+            (Lead.form_name.ilike(f"%{form_name}%"))
+        )
     if search:
         p = f"%{search}%"
         query = query.filter(
             (Lead.name.ilike(p)) |
             (Lead.email.ilike(p)) |
             (Lead.phone.ilike(p)) |
-            (Lead.campaign_name.ilike(p))
+            (Lead.campaign_name.ilike(p)) |
+            (Lead.form_name.ilike(p))
         )
     if date_from:
         try:
@@ -101,7 +148,7 @@ def list_leads(
             pass
 
     total = query.count()
-    leads = query.order_by(Lead.created_at.desc()).offset(offset).limit(limit).all()
+    leads = query.order_by(Lead.created_at.desc().nullslast(), Lead.id.desc()).offset(offset).limit(limit).all()
 
     if response is not None:
         response.headers["X-Total-Count"] = str(total)

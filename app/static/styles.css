@@ -536,14 +536,17 @@ strong { font-weight:600; }
 .table-wrap {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  overflow: auto;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  overflow-x: auto;
+  overflow-y: auto;
   max-height: calc(100vh - 280px);
+  width: 100%;
 }
 .data-table {
   width: 100%;
   border-collapse: collapse;
   white-space: nowrap;
+  table-layout: auto;
 }
 .data-table thead {
   position: sticky;
@@ -561,12 +564,30 @@ strong { font-weight:600; }
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
 }
+.data-table th.col-id { width: 65px; min-width: 55px; }
+.data-table th.col-contact { min-width: 160px; }
+.data-table th.col-campaign { min-width: 140px; }
+.data-table th.col-form { min-width: 150px; max-width: 220px; }
+.data-table th.col-assigned { min-width: 130px; }
+.data-table th.col-date { min-width: 130px; }
+.data-table th.col-dynamic {
+  min-width: 140px;
+  max-width: 240px;
+  background: var(--accent-glow);
+  color: var(--accent);
+}
 .data-table td {
   padding: 13px 18px;
   font-size: 13px;
   color: var(--text);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+}
+.data-table td.col-dynamic {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: var(--glass); }
