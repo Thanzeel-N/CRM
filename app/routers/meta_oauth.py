@@ -44,7 +44,13 @@ def get_auth_url(request: Request):
         # Mock local dev flow - redirect straight to our callback with a dummy code
         url = f"{redirect_uri}?code=mock_oauth_code"
     else:
-        config_id = getattr(settings, "meta_config_id", "") or "4640757052822358"
+        config_id = getattr(settings, "meta_config_id", "")
+
+        if not config_id:
+            raise HTTPException(
+                status_code=500,
+                detail="META_CONFIG_ID is not configured"
+            )
         url = (
             f"https://www.facebook.com/v20.0/dialog/oauth?"
             f"client_id={settings.meta_app_id}"
@@ -330,6 +336,28 @@ async def connect_page(
                                 continue
                                 
                             fields = parse_field_data(l.get("field_data", []))
+                            
+                            phone = fields.get("phone_number")
+                            email = fields.get("email")
+                            campaign_name = l.get("campaign_name")
+                            
+                            from sqlalchemy import or_, and_
+                            duplicate_conds = []
+                            if phone:
+                                duplicate_conds.append(and_(Lead.phone != None, Lead.phone != "", Lead.phone == phone))
+                            if email:
+                                duplicate_conds.append(and_(Lead.email != None, Lead.email != "", Lead.email == email))
+                                
+                            if duplicate_conds:
+                                existing_duplicate = db.query(Lead).filter(
+                                    Lead.org_id == current_user.org_id,
+                                    Lead.campaign_name == campaign_name,
+                                    or_(*duplicate_conds)
+                                ).first()
+                                if existing_duplicate:
+                                    seen_lead_ids.add(fb_lead_id)
+                                    sync_results["duplicates_skipped"] += 1
+                                    continue
                             
                             created_at_val = None
                             if "created_time" in l:

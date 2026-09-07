@@ -146,7 +146,7 @@ async def receive_meta_lead(
             if existing:
                 logger.debug("Duplicate lead skipped: fb_lead_id=%s", leadgen_id)
                 continue
-
+                
             try:
                 details = await fetch_lead_details(leadgen_id, access_token=access_token)
             except Exception:
@@ -154,6 +154,29 @@ async def receive_meta_lead(
                 continue
 
             fields = parse_field_data(details.get("field_data", []))
+            
+            # Check for duplicates by phone/email and campaign
+            phone = fields.get("phone_number")
+            email = fields.get("email")
+            campaign_name = details.get("campaign_name")
+            
+            from sqlalchemy import or_, and_
+            duplicate_conds = []
+            if phone:
+                duplicate_conds.append(and_(Lead.phone != None, Lead.phone != "", Lead.phone == phone))
+            if email:
+                duplicate_conds.append(and_(Lead.email != None, Lead.email != "", Lead.email == email))
+                
+            if duplicate_conds:
+                existing_duplicate = db.query(Lead).filter(
+                    Lead.org_id == org_id,
+                    Lead.campaign_name == campaign_name,
+                    or_(*duplicate_conds)
+                ).first()
+                if existing_duplicate:
+                    logger.debug("Duplicate lead by phone/email skipped for fb_lead_id=%s", leadgen_id)
+                    continue
+
             form_id = details.get("form_id")
 
             # Check if form is in connected forms (matching by string or dict id)
