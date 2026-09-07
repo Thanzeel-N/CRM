@@ -1383,6 +1383,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
+  }
+
   // Filter change listeners
   const campaignSel = document.getElementById('campaignFilterSelect');
   const formSel = document.getElementById('formFilterSelect');
