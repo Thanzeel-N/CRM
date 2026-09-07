@@ -574,7 +574,6 @@ strong { font-weight:600; }
 .data-table th.col-date { min-width: 130px; }
 .data-table th.col-dynamic {
   min-width: 140px;
-  max-width: 240px;
   background: var(--accent-glow);
   color: var(--accent);
 }
@@ -586,9 +585,6 @@ strong { font-weight:600; }
   vertical-align: middle;
 }
 .data-table td.col-dynamic {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .data-table tr:last-child td { border-bottom: none; }

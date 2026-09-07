@@ -497,7 +497,7 @@ function renderTable(leads, total) {
             val = field.values.join(', ');
           }
         }
-        rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(val)}">${esc(val)}</td>`;
+        rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);white-space:nowrap;" title="${esc(val)}">${esc(val)}</td>`;
       });
 
       rowHtml += `
