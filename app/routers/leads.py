@@ -200,15 +200,16 @@ def list_leads(
             (Lead.form_name.ilike(p))
         )
     if date_from:
+        # Validate format but use string for safer SQLite comparison
         try:
-            d_from = datetime.strptime(date_from, "%Y-%m-%d").date()
-            query = query.filter(func.date(Lead.created_at) >= d_from)
+            datetime.strptime(date_from, "%Y-%m-%d")
+            query = query.filter(func.date(Lead.created_at) >= date_from)
         except ValueError:
             pass
     if date_to:
         try:
-            d_to = datetime.strptime(date_to, "%Y-%m-%d").date()
-            query = query.filter(func.date(Lead.created_at) <= d_to)
+            datetime.strptime(date_to, "%Y-%m-%d")
+            query = query.filter(func.date(Lead.created_at) <= date_to)
         except ValueError:
             pass
 
