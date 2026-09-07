@@ -473,7 +473,7 @@ function renderTable(leads, total) {
       const statusClass = statusText.replace(/ /g, '-');
 
       let rowHtml = `
-        <tr>
+        <tr class="lead-row" onclick="openLeadDrawerById(${l.id})" style="cursor:pointer;">
           <td class="col-id" style="color:var(--text-3);font-size:11px;">#${l.id || ''}</td>
           <td><strong>${esc(l.name || '—')}</strong></td>
           <td class="col-contact"><div style="font-size:12px;color:var(--text-2);line-height:1.6;">${esc(l.email || '—')}<br>${esc(l.phone || '')}</div></td>
@@ -497,13 +497,13 @@ function renderTable(leads, total) {
             val = field.values.join(', ');
           }
         }
-        rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);white-space:nowrap;" title="${esc(val)}">${esc(val)}</td>`;
+        rowHtml += `<td class="col-dynamic" style="font-size:12px;color:var(--text-2);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${esc(val)}">${esc(val)}</td>`;
       });
 
       rowHtml += `
           <td>
-            <button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;" onclick="openLeadDrawerById(${l.id})">
-              Open
+            <button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px;" onclick="event.stopPropagation(); openLeadDrawerById(${l.id})">
+              <i data-lucide="panel-right" style="width:14px;height:14px;"></i> Details
             </button>
           </td>
         </tr>
@@ -514,6 +514,8 @@ function renderTable(leads, total) {
       return '';
     }
   }).join('');
+
+  lucide.createIcons();
 }
 
 function renderPagination() {
@@ -570,6 +572,45 @@ function openLeadDrawer(lead) {
   document.getElementById('drawerLeadMetaId').textContent  = lead.fb_lead_id || '—';
   document.getElementById('drawerStatusSelect').value      = lead.status;
   document.getElementById('drawerNotesTextarea').value     = lead.notes || '';
+
+  // Render dynamic form responses
+  const answersBox = document.getElementById('drawerFormAnswers');
+  const formBadge = document.getElementById('drawerFormNameBadge');
+  if (formBadge) formBadge.textContent = lead.form_name || 'Meta Form';
+
+  let fieldItems = [];
+  if (lead.raw_data && Array.isArray(lead.raw_data.field_data)) {
+    lead.raw_data.field_data.forEach(f => {
+      const q = f.name ? f.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Question';
+      const val = (Array.isArray(f.values) ? f.values.join(', ') : f.values) || '—';
+      fieldItems.push({ q, a: val });
+    });
+  } else if (lead.raw_data && typeof lead.raw_data === 'object') {
+    Object.entries(lead.raw_data).forEach(([key, val]) => {
+      if (['created_time', 'id', 'form_id', 'page_id', 'ad_id', 'adset_id', 'campaign_id', 'campaign_name', 'field_data'].includes(key)) return;
+      const q = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const displayVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+      fieldItems.push({ q, a: displayVal });
+    });
+  }
+
+  if (answersBox) {
+    if (fieldItems.length === 0) {
+      answersBox.innerHTML = '<p style="font-size:12px; color:var(--text-3); font-style:italic;">No custom form fields recorded.</p>';
+    } else {
+      answersBox.innerHTML = fieldItems.map(item => `
+        <div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px;">
+          <div style="font-size:11px; font-weight:600; color:var(--accent); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">
+            ${esc(item.q)}
+          </div>
+          <div style="font-size:13px; color:var(--text); font-weight:500; word-break:break-word;">
+            ${esc(item.a)}
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
   document.getElementById('whatsappChatBox').innerHTML     = '<p class="chat-empty">Loading messages…</p>';
   openDrawer();
   lucide.createIcons();
