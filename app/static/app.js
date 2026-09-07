@@ -1113,11 +1113,14 @@ function copyText(elId) {
 async function loadAll() {
   updateUserUI();
   if (state.token) {
-    // Default to today's leads on every fresh load
-    const todayStr = toISODate(new Date());
-    state.dateFrom = todayStr;
-    state.dateTo   = todayStr;
-    state.activeChip = 'today';
+    // Default to All Leads on load so all historical leads display sorted by date descending
+    state.dateFrom = null;
+    state.dateTo   = null;
+    state.activeChip = 'all';
+    ['chipToday','chipYesterday','chipWeek','chipAll'].forEach(id => {
+      document.getElementById(id)?.classList.remove('active');
+    });
+    document.getElementById('chipAll')?.classList.add('active');
     await loadCampaigns();
     await loadLeads();
     await loadIntegrations();

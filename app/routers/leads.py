@@ -66,7 +66,7 @@ def list_lead_forms(
                 if isinstance(item, dict) and item.get("id") and item.get("name"):
                     form_map[str(item["id"])] = item["name"]
 
-    # 2. Backfill existing leads where form_name is raw form ID
+    # 2. Backfill existing leads where form_name is raw form ID or created_at needs exact timestamp
     if form_map:
         numeric_leads = db.query(Lead).filter(
             Lead.org_id == current_user.org_id,
@@ -77,6 +77,28 @@ def list_lead_forms(
                 if l.form_name in form_map:
                     l.form_name = form_map[l.form_name]
             db.commit()
+
+    # 2.5 Backfill created_at from raw_data if available
+    try:
+        import dateutil.parser
+        leads_to_fix = db.query(Lead).filter(
+            Lead.org_id == current_user.org_id,
+            Lead.raw_data != None
+        ).all()
+        date_updated = False
+        for l in leads_to_fix:
+            if isinstance(l.raw_data, dict) and "created_time" in l.raw_data:
+                try:
+                    parsed_dt = dateutil.parser.parse(l.raw_data["created_time"])
+                    if l.created_at != parsed_dt:
+                        l.created_at = parsed_dt
+                        date_updated = True
+                except Exception:
+                    pass
+        if date_updated:
+            db.commit()
+    except Exception as ex:
+        pass
 
     # 3. Query distinct form names
     forms_db = db.query(Lead.form_name).filter(
