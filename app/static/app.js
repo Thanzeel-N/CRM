@@ -27,7 +27,7 @@ const state = {
   // Active date filter
   dateFrom: null,   // 'YYYY-MM-DD' or null
   dateTo: null,
-  activeChip: 'today',
+  activeChip: 'all',
 };
 
 // ─── API Helper ──────────────────────────────────────────────────
@@ -731,6 +731,7 @@ async function loadCampaigns() {
 
 function renderCampaignsGrid() {
   const grid = document.getElementById('campaignsGrid');
+  if (!grid) return;
   if (!state.campaigns.length) {
     grid.innerHTML = `<div class="empty-state">
       <i data-lucide="megaphone"></i>
@@ -739,7 +740,18 @@ function renderCampaignsGrid() {
     lucide.createIcons();
     return;
   }
-  grid.innerHTML = state.campaigns.map(c => `
+  grid.innerHTML = state.campaigns.map(c => {
+    const sheetsList = (c.google_sheets || []).map(s => `
+      <div style="font-size:11.5px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:var(--bg); border:1px solid var(--border); padding:5px 8px; border-radius:6px; margin-top:4px;">
+        <div style="display:flex; align-items:center; gap:5px; overflow:hidden; text-overflow:ellipsis;">
+          <i data-lucide="file-spreadsheet" style="width:13px; height:13px; color:#0F9D58; flex-shrink:0;"></i>
+          <span style="font-weight:600; color:var(--text);">${esc(s.sheet_name)}</span>
+        </div>
+        <a href="${esc(s.spreadsheet_url)}" target="_blank" style="font-size:10.5px; color:var(--accent); text-decoration:underline;">View</a>
+      </div>
+    `).join('') || '<div style="font-size:11px; color:var(--text-3); font-style:italic; margin-top:4px;">No Google Sheets connected</div>';
+
+    return `
     <div class="campaign-card">
       <div class="campaign-card-head">
         <h4>${esc(c.name)}</h4>
@@ -749,22 +761,36 @@ function renderCampaignsGrid() {
         ${c.description ? `<div>${esc(c.description)}</div>` : ''}
         ${c.meta_form_id ? `<div>Form ID: <code>${esc(c.meta_form_id)}</code></div>` : ''}
         ${c.meta_ad_account_id ? `<div>Ad Account: <code>${esc(c.meta_ad_account_id)}</code></div>` : ''}
+        <div style="margin-top:10px;">
+          <div style="font-size:10px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:0.04em;">Google Sheets (${(c.google_sheets || []).length}):</div>
+          ${sheetsList}
+        </div>
       </div>
-      <div class="campaign-foot">
+      <div class="campaign-foot" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
         <div class="campaign-assignee">
           <i data-lucide="user"></i>
           <span>${esc(c.assigned_user_name || 'Unassigned')}</span>
         </div>
         <span class="campaign-lead-count">${c.lead_count} leads</span>
-        <div class="campaign-actions">
-          <button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:12px;" onclick="editCampaign(${c.id})">
+        <div class="campaign-actions" style="display:flex; gap:6px;">
+          <button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:11px;" onclick="openCampaignSheetModal(${c.id})">
+            <i data-lucide="file-spreadsheet" style="width:12px;height:12px;color:#0F9D58;"></i> + Sheet
+          </button>
+          <button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:11px;" onclick="editCampaign(${c.id})">
             Reassign
           </button>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   lucide.createIcons();
 }
+
+window.openCampaignSheetModal = function(campaignId) {
+  if (!state.token) return;
+  populateCampaignDropdown('gsCampaignSelect', campaignId);
+  openModal('googleSheetsModal');
+};
 
 async function editCampaign(id) {
   const campaign = state.campaigns.find(c => c.id === id);
@@ -917,45 +943,35 @@ async function loadIntegrations() {
       });
     } catch(e) { console.error('FB Conns failed', e); }
     
-    // 2. Fetch Google Sheets Status
+    // 2. Fetch Google Sheets Connections
     try {
-      const gsRes = await api('/integrations/google-sheets/status');
+      const gsConns = await api('/integrations/google-sheets/connections') || [];
       const gsConnectCard = document.getElementById('googleSheetsConnectCard');
       if (gsConnectCard) {
-        gsConnectCard.style.display = (gsRes && gsRes.connected) ? 'none' : 'flex';
+        gsConnectCard.style.display = gsConns.length > 0 ? 'none' : 'flex';
       }
 
-      if (gsRes && gsRes.connected) {
+      gsConns.forEach(sc => {
         html += `
-          <div class="integration-card" style="margin-top:12px;">
+          <div class="integration-card" style="margin-top:12px; border:1px solid var(--border);">
             <div class="integration-card-left">
               <div class="integration-icon"><i data-lucide="file-spreadsheet" style="color: #0F9D58;"></i></div>
               <div class="integration-info">
-                <h3>Google Sheets Sync <span class="integration-status">Active</span></h3>
-                <p>Syncing to <a href="${esc(gsRes.spreadsheet_url)}" target="_blank">Spreadsheet</a> (${esc(gsRes.sheet_name)})</p>
+                <h3>${esc(sc.campaign_name)} <span class="integration-status">Tab: ${esc(sc.sheet_name)}</span></h3>
+                <p>Syncing to <a href="${esc(sc.spreadsheet_url)}" target="_blank" style="color:var(--accent);text-decoration:underline;">Google Spreadsheet</a></p>
               </div>
             </div>
-            <button class="btn btn-ghost" style="color:var(--red);" id="btnDisconnectGs">Disconnect</button>
+            <button class="btn btn-ghost" style="color:var(--red); border-color:var(--border);" onclick="deleteGoogleSheetConn(${sc.id})">
+              <i data-lucide="trash-2"></i> Remove
+            </button>
           </div>
         `;
-      }
-    } catch (e) { console.error('GS Status failed', e); }
+      });
+    } catch (e) { console.error('GS Connections failed', e); }
 
     if (html) {
       list.innerHTML = html;
       lucide.createIcons();
-      
-      const disconnectBtn = document.getElementById('btnDisconnectGs');
-      if (disconnectBtn) {
-        disconnectBtn.addEventListener('click', async () => {
-          if(!confirm('Stop syncing leads to Google Sheets?')) return;
-          try {
-            await api('/integrations/google-sheets/disconnect', { method: 'POST' });
-            toast('Google Sheets disconnected');
-            loadIntegrations();
-          } catch (err) { console.error('[OrgSettings Error]', err); toast(err.message, 'error'); }
-        });
-      }
     }
 
     const dot = document.querySelector('.badge-dot');
@@ -966,8 +982,22 @@ async function loadIntegrations() {
   } catch (err) { console.error('Integrations failed:', err); }
 }
 
+window.deleteGoogleSheetConn = async function(connId) {
+  if (!confirm('Remove this Google Sheet connection? Leads will no longer sync to this worksheet.')) return;
+  try {
+    await api(`/integrations/google-sheets/connections/${connId}`, { method: 'DELETE' });
+    toast('Google Sheet connection removed ✓');
+    loadIntegrations();
+    loadCampaigns();
+  } catch (err) {
+    console.error('Delete Google Sheet conn error:', err);
+    toast('Failed to remove connection: ' + err.message, 'error');
+  }
+};
+
 document.getElementById('btnConnectGoogleSheets')?.addEventListener('click', () => {
   if (!state.token) return;
+  populateCampaignDropdown('gsCampaignSelect');
   openModal('googleSheetsModal');
 });
 
@@ -976,15 +1006,18 @@ document.getElementById('cancelGoogleSheets')?.addEventListener('click', () => c
 
 document.getElementById('googleSheetsForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const campVal = document.getElementById('gsCampaignSelect').value;
   const payload = {
     spreadsheet_url: document.getElementById('gsUrl').value,
-    sheet_name: document.getElementById('gsSheetName').value || 'Sheet1'
+    sheet_name: document.getElementById('gsSheetName').value || 'Sheet1',
+    campaign_id: campVal ? parseInt(campVal, 10) : null
   };
   try {
     await api('/integrations/google-sheets/connect', { method: 'POST', body: JSON.stringify(payload) });
     toast('Google Sheet Connected! Leads will now sync automatically. ✓');
     closeModal('googleSheetsModal');
     loadIntegrations();
+    loadCampaigns();
   } catch (err) { console.error('[GoogleSheets Error]', err); toast(err.message, 'error'); }
 });
 
@@ -1360,9 +1393,42 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+async function syncMetaLeads() {
+  if (!state.token) { openModal('authModal'); return; }
+  const btn = document.getElementById('syncMetaBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="refresh-cw" class="spin"></i><span>Syncing...</span>`;
+    lucide.createIcons();
+  }
+  try {
+    const res = await api('/integrations/facebook/sync', { method: 'POST' });
+    if (res && res.sync_results) {
+      const { leads_imported, duplicates_skipped } = res.sync_results;
+      toast(`Sync complete! ${leads_imported} new lead(s) imported, ${duplicates_skipped} duplicate(s) skipped.`, 'success');
+    } else {
+      toast(res?.message || 'Sync complete!', 'success');
+    }
+    loadLeads();
+    loadStats();
+  } catch (err) {
+    console.error('Meta sync failed:', err);
+    toast('Meta sync failed: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="refresh-cw"></i><span>Sync Meta</span>`;
+      lucide.createIcons();
+    }
+  }
+}
+
 // Boot
 document.addEventListener('DOMContentLoaded', () => {
   lucide.createIcons();
+  
+  // Sync Meta Leads listener
+  document.getElementById('syncMetaBtn')?.addEventListener('click', syncMetaLeads);
   
   // Initialize Flatpickr calendars
   if (typeof flatpickr !== 'undefined') {

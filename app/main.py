@@ -47,9 +47,16 @@ app.add_middleware(
 )
 
 # ── Database ───────────────────────────────────────────────────────────────────
-# Creates tables on startup if they don't exist (safe for SQLite dev / first-run).
-# For production MySQL, use Alembic migrations instead:  alembic upgrade head
 Base.metadata.create_all(bind=engine)
+
+# Auto-migration helper for SQLite dev environments
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text
+        conn.execute(text("ALTER TABLE google_sheet_connections ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)"))
+        conn.commit()
+except Exception:
+    pass
 
 # ── Global exception handler ───────────────────────────────────────────────────
 @app.exception_handler(Exception)

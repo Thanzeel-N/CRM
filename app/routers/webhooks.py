@@ -218,20 +218,41 @@ async def receive_meta_lead(
             db.refresh(lead)
             logger.info("New lead saved: id=%s name='%s' org_id=%s", lead.id, lead.name, org_id)
 
-            # Trigger Google Sheets sync if connected
-            gs_conn = db.query(GoogleSheetConnection).filter(
-                GoogleSheetConnection.org_id == org_id,
-                GoogleSheetConnection.status == "active",
-            ).first()
-            if gs_conn:
+            # Trigger Google Sheets sync for all matching campaign connections
+            sync_lead_to_google_sheets(db, lead, background_tasks)
+
+    return {"status": "ok"}
+
+
+def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: BackgroundTasks = None):
+    """Find all matching Google Sheets for this lead's campaign / org and append rows."""
+    conns = db.query(GoogleSheetConnection).filter(
+        GoogleSheetConnection.org_id == lead.org_id,
+        GoogleSheetConnection.status == "active",
+    ).all()
+
+    for gs_conn in conns:
+        matches = False
+        if gs_conn.campaign_id is None:
+            matches = True
+        elif lead.campaign_id and gs_conn.campaign_id == lead.campaign_id:
+            matches = True
+        elif lead.campaign_name and gs_conn.campaign and gs_conn.campaign.name.strip().lower() == lead.campaign_name.strip().lower():
+            matches = True
+
+        if matches:
+            if background_tasks:
                 background_tasks.add_task(
                     _sync_to_google_sheet,
                     gs_conn.spreadsheet_id,
-                    gs_conn.sheet_name,
+                    gs_conn.sheet_name or "Sheet1",
                     lead,
                 )
-
-    return {"status": "ok"}
+            else:
+                try:
+                    _sync_to_google_sheet(gs_conn.spreadsheet_id, gs_conn.sheet_name or "Sheet1", lead)
+                except Exception as e:
+                    logger.warning("Google Sheet sync failed for lead %s: %s", lead.id, e)
 
 
 # ---------- WHATSAPP ----------

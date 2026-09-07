@@ -29,6 +29,16 @@ class CampaignUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class SheetConnectionOut(BaseModel):
+    id: int
+    spreadsheet_url: str
+    sheet_name: str
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
 class CampaignOut(BaseModel):
     id: int
     org_id: int
@@ -40,6 +50,7 @@ class CampaignOut(BaseModel):
     assigned_user_name: Optional[str] = None
     is_active: bool
     lead_count: int = 0
+    google_sheets: List[SheetConnectionOut] = []
 
     class Config:
         from_attributes = True
@@ -52,7 +63,24 @@ def _require_admin(current_user: User):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-def _campaign_out(c: Campaign) -> CampaignOut:
+def _campaign_out(c: Campaign, db: Session) -> CampaignOut:
+    from app.models import Lead
+    count = db.query(Lead).filter(
+        Lead.org_id == c.org_id,
+        (Lead.campaign_id == c.id) | (Lead.campaign_name == c.name)
+    ).count()
+
+    sheets = [
+        SheetConnectionOut(
+            id=s.id,
+            spreadsheet_url=s.spreadsheet_url,
+            sheet_name=s.sheet_name or "Sheet1",
+            status=s.status
+        )
+        for s in (c.google_sheets or [])
+        if s.status == "active"
+    ]
+
     return CampaignOut(
         id=c.id,
         org_id=c.org_id,
@@ -63,7 +91,8 @@ def _campaign_out(c: Campaign) -> CampaignOut:
         assigned_user_id=c.assigned_user_id,
         assigned_user_name=c.assigned_user.name if c.assigned_user else None,
         is_active=c.is_active,
-        lead_count=len(c.leads),
+        lead_count=count,
+        google_sheets=sheets
     )
 
 
@@ -77,12 +106,44 @@ def list_campaigns(
     """
     Admin: sees all campaigns in the org.
     Agent: sees only campaigns assigned to them.
+    Auto-discovers and registers Meta campaigns present in Lead table.
     """
+    from app.models import Lead
+
+    # 1. Auto-discover distinct campaign names from Lead table
+    distinct_campaigns = db.query(Lead.campaign_name).filter(
+        Lead.org_id == current_user.org_id,
+        Lead.campaign_name != None,
+        Lead.campaign_name != ""
+    ).distinct().all()
+
+    existing_names = set(
+        c[0] for c in db.query(Campaign.name).filter(Campaign.org_id == current_user.org_id).all()
+    )
+
+    created_any = False
+    for row in distinct_campaigns:
+        camp_name = row[0]
+        if camp_name and camp_name not in existing_names:
+            new_c = Campaign(
+                org_id=current_user.org_id,
+                name=camp_name,
+                description="Auto-created from Meta Lead Ads",
+                is_active=True
+            )
+            db.add(new_c)
+            existing_names.add(camp_name)
+            created_any = True
+
+    if created_any:
+        db.commit()
+
+    # 2. Query campaigns for current user
     q = db.query(Campaign).filter(Campaign.org_id == current_user.org_id)
     if current_user.role == UserRole.agent:
         q = q.filter(Campaign.assigned_user_id == current_user.id)
     campaigns = q.order_by(Campaign.created_at.desc()).all()
-    return [_campaign_out(c) for c in campaigns]
+    return [_campaign_out(c, db) for c in campaigns]
 
 
 @router.post("", response_model=CampaignOut)
@@ -113,7 +174,7 @@ def create_campaign(
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    return _campaign_out(campaign)
+    return _campaign_out(campaign, db)
 
 
 @router.patch("/{campaign_id}", response_model=CampaignOut)
@@ -144,7 +205,7 @@ def update_campaign(
 
     db.commit()
     db.refresh(campaign)
-    return _campaign_out(campaign)
+    return _campaign_out(campaign, db)
 
 
 @router.delete("/{campaign_id}")

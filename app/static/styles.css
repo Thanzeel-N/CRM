@@ -954,17 +954,47 @@ select.form-control { cursor: pointer; appearance: auto; }
 
 /* ═══════════════ RESPONSIVE ══════════════════════════════════════ */
 
-/* ─── Tablet (≤ 1200px) ──────────────────────────────────────────── */
-@media (max-width: 1200px) {
-  .metrics-grid        { grid-template-columns: repeat(2, 1fr); }
-  .kanban-board        { grid-template-columns: repeat(3, minmax(200px, 1fr)); overflow-x: auto; }
-  .charts-grid         { grid-template-columns: 1fr; }
-  .simulator-layout    { grid-template-columns: 1fr; }
-  
-  .col-assigned { display: none; }
+/* Spin animation helper */
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
-/* ─── Mobile (≤ 900px) ───────────────────────────────────────────── */
+/* ─── Table Section Header Layout ────────────────────────────────── */
+.table-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.table-actions-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ─── Large Screens / Desktop Optimizations (≥ 1201px) ───────────── */
+@media (min-width: 1201px) {
+  .metrics-grid { grid-template-columns: repeat(4, 1fr); }
+  .kanban-board { grid-template-columns: repeat(5, 1fr); }
+  .charts-grid  { grid-template-columns: 1fr 1fr; }
+}
+
+/* ─── Desktop / Laptop (1025px - 1200px) ────────────────────────── */
+@media (max-width: 1200px) and (min-width: 901px) {
+  .metrics-grid     { grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .kanban-board     { grid-template-columns: repeat(5, minmax(180px, 1fr)); overflow-x: auto; }
+  .charts-grid      { grid-template-columns: 1fr 1fr; }
+  .simulator-layout { grid-template-columns: 1fr; }
+}
+
+/* ─── Mobile / Tablet (≤ 900px) ──────────────────────────────────── */
 @media (max-width: 900px) {
   /* Sidebar slides in/out */
   :root { --sidebar-w: 0px; }
@@ -1015,8 +1045,6 @@ select.form-control { cursor: pointer; appearance: auto; }
 
   /* Modal box full width */
   .modal-box { padding: 16px; }
-  
-  .col-form { display: none; }
 }
 
 /* ─── Small Mobile (≤ 600px) ─────────────────────────────────────── */

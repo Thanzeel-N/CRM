@@ -79,6 +79,7 @@ class GoogleSheetConnection(Base):
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False) # Who connected it
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=True, index=True) # Linked campaign
     spreadsheet_url = Column(String(512), nullable=False)
     spreadsheet_id = Column(String(255), nullable=False)
     sheet_name = Column(String(255), default="Sheet1")
@@ -87,6 +88,7 @@ class GoogleSheetConnection(Base):
 
     organization = relationship("Organization", back_populates="google_sheets")
     user = relationship("User")
+    campaign = relationship("Campaign", back_populates="google_sheets")
 
 
 class Campaign(Base):
@@ -106,6 +108,7 @@ class Campaign(Base):
     organization = relationship("Organization", back_populates="campaigns")
     assigned_user = relationship("User", back_populates="assigned_campaigns", foreign_keys=[assigned_user_id])
     leads = relationship("Lead", back_populates="campaign", cascade="all, delete-orphan")
+    google_sheets = relationship("GoogleSheetConnection", back_populates="campaign", cascade="all, delete-orphan")
 
 
 class Lead(Base):

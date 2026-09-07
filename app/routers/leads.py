@@ -142,67 +142,6 @@ async def list_lead_forms(
             db.commit()
     except Exception:
         pass
-
-    # 2.7 Deduplicate leads by fb_lead_id
-    try:
-        from sqlalchemy import func
-        # Find duplicates
-        dupes = db.query(Lead.fb_lead_id, func.min(Lead.id).label('min_id')).filter(
-            Lead.org_id == current_user.org_id,
-            Lead.fb_lead_id != None
-        ).group_by(Lead.fb_lead_id).having(func.count(Lead.fb_lead_id) > 1).all()
-        
-        if dupes:
-            for fb_id, min_id in dupes:
-                db.query(Lead).filter(
-                    Lead.org_id == current_user.org_id,
-                    Lead.fb_lead_id == fb_id,
-                    Lead.id != min_id
-                ).delete()
-            db.commit()
-    except Exception:
-        pass
-
-
-    # 2.8 Deduplicate leads by phone/email + campaign
-    try:
-        from sqlalchemy import func
-        # Find duplicates by phone and campaign
-        dupes_phone = db.query(Lead.phone, Lead.campaign_name, func.min(Lead.id).label('min_id')).filter(
-            Lead.org_id == current_user.org_id,
-            Lead.phone != None,
-            Lead.phone != ""
-        ).group_by(Lead.phone, Lead.campaign_name).having(func.count(Lead.id) > 1).all()
-        
-        if dupes_phone:
-            for phone, camp_name, min_id in dupes_phone:
-                db.query(Lead).filter(
-                    Lead.org_id == current_user.org_id,
-                    Lead.phone == phone,
-                    Lead.campaign_name == camp_name,
-                    Lead.id != min_id
-                ).delete()
-            db.commit()
-
-        # Find duplicates by email and campaign
-        dupes_email = db.query(Lead.email, Lead.campaign_name, func.min(Lead.id).label('min_id')).filter(
-            Lead.org_id == current_user.org_id,
-            Lead.email != None,
-            Lead.email != ""
-        ).group_by(Lead.email, Lead.campaign_name).having(func.count(Lead.id) > 1).all()
-        
-        if dupes_email:
-            for email, camp_name, min_id in dupes_email:
-                db.query(Lead).filter(
-                    Lead.org_id == current_user.org_id,
-                    Lead.email == email,
-                    Lead.campaign_name == camp_name,
-                    Lead.id != min_id
-                ).delete()
-            db.commit()
-    except Exception:
-        pass
-
     # 3. Query distinct form names
     forms_db = db.query(Lead.form_name).filter(
         Lead.org_id == current_user.org_id,

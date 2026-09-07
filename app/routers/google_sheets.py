@@ -24,71 +24,146 @@ def extract_spreadsheet_id(url: str) -> str:
         return match.group(1)
     return ""
 
+from typing import Optional, List
+from pydantic import BaseModel, Field
+
+class GoogleSheetConnectRequest(BaseModel):
+    spreadsheet_url: str
+    sheet_name: str = Field(default="Sheet1")
+    campaign_id: Optional[int] = None
+
+class GoogleSheetConnectionOut(BaseModel):
+    id: int
+    spreadsheet_url: str
+    sheet_name: str
+    campaign_id: Optional[int] = None
+    campaign_name: str = "Org-wide (All Campaigns)"
+    status: str
+
+    class Config:
+        from_attributes = True
+
 @router.post("/connect")
 async def connect_google_sheet(
-    spreadsheet_url: str = Body(...),
-    sheet_name: str = Body(default="Sheet1"),
+    payload: GoogleSheetConnectRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    spreadsheet_id = extract_spreadsheet_id(spreadsheet_url)
+    spreadsheet_id = extract_spreadsheet_id(payload.spreadsheet_url)
     if not spreadsheet_id:
         raise HTTPException(status_code=400, detail="Invalid Google Sheets URL")
 
-    # Check if existing connection
+    # Validate campaign_id if provided
+    if payload.campaign_id:
+        from app.models import Campaign
+        camp = db.query(Campaign).filter(
+            Campaign.id == payload.campaign_id,
+            Campaign.org_id == current_user.org_id
+        ).first()
+        if not camp:
+            raise HTTPException(status_code=400, detail="Campaign not found in your organization")
+
+    # Check if exact connection (url + sheet_name + campaign_id) already exists
     conn = db.query(GoogleSheetConnection).filter(
-        GoogleSheetConnection.org_id == current_user.org_id
+        GoogleSheetConnection.org_id == current_user.org_id,
+        GoogleSheetConnection.spreadsheet_url == payload.spreadsheet_url,
+        GoogleSheetConnection.sheet_name == payload.sheet_name,
+        GoogleSheetConnection.campaign_id == payload.campaign_id
     ).first()
 
     if conn:
-        conn.spreadsheet_url = spreadsheet_url
-        conn.spreadsheet_id = spreadsheet_id
-        conn.sheet_name = sheet_name
         conn.status = "active"
+        conn.spreadsheet_id = spreadsheet_id
         conn.user_id = current_user.id
     else:
         conn = GoogleSheetConnection(
             org_id=current_user.org_id,
             user_id=current_user.id,
-            spreadsheet_url=spreadsheet_url,
+            campaign_id=payload.campaign_id,
+            spreadsheet_url=payload.spreadsheet_url,
             spreadsheet_id=spreadsheet_id,
-            sheet_name=sheet_name,
+            sheet_name=payload.sheet_name or "Sheet1",
             status="active"
         )
         db.add(conn)
         
     db.commit()
-    return {"status": "success", "message": "Google Sheet connected"}
+    db.refresh(conn)
+    return {"status": "success", "message": "Google Sheet connected successfully", "id": conn.id}
+
+@router.get("/connections", response_model=List[GoogleSheetConnectionOut])
+async def list_google_sheet_connections(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    conns = db.query(GoogleSheetConnection).filter(
+        GoogleSheetConnection.org_id == current_user.org_id,
+        GoogleSheetConnection.status == "active"
+    ).order_by(GoogleSheetConnection.created_at.desc()).all()
+
+    result = []
+    for c in conns:
+        c_name = c.campaign.name if c.campaign else "Org-wide (All Campaigns)"
+        result.append(GoogleSheetConnectionOut(
+            id=c.id,
+            spreadsheet_url=c.spreadsheet_url,
+            sheet_name=c.sheet_name or "Sheet1",
+            campaign_id=c.campaign_id,
+            campaign_name=c_name,
+            status=c.status
+        ))
+    return result
 
 @router.get("/status")
 async def get_connection_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    conns = db.query(GoogleSheetConnection).filter(
+        GoogleSheetConnection.org_id == current_user.org_id,
+        GoogleSheetConnection.status == "active"
+    ).all()
+    
+    if not conns:
+        return {"connected": False, "count": 0}
+        
+    first = conns[0]
+    return {
+        "connected": True,
+        "count": len(conns),
+        "spreadsheet_url": first.spreadsheet_url,
+        "sheet_name": first.sheet_name
+    }
+
+@router.delete("/connections/{conn_id}")
+async def delete_google_sheet_connection(
+    conn_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     conn = db.query(GoogleSheetConnection).filter(
+        GoogleSheetConnection.id == conn_id,
         GoogleSheetConnection.org_id == current_user.org_id
     ).first()
     
-    if not conn or conn.status != "active":
-        return {"connected": False}
+    if not conn:
+        raise HTTPException(status_code=404, detail="Google Sheet connection not found")
         
-    return {
-        "connected": True,
-        "spreadsheet_url": conn.spreadsheet_url,
-        "sheet_name": conn.sheet_name
-    }
+    db.delete(conn)
+    db.commit()
+    return {"status": "success", "message": "Google Sheet connection deleted"}
 
 @router.post("/disconnect")
 async def disconnect_google_sheet(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    conn = db.query(GoogleSheetConnection).filter(
+    conns = db.query(GoogleSheetConnection).filter(
         GoogleSheetConnection.org_id == current_user.org_id
-    ).first()
+    ).all()
     
-    if conn:
+    for conn in conns:
         db.delete(conn)
-        db.commit()
+    db.commit()
         
     return {"status": "disconnected"}

@@ -476,3 +476,144 @@ async def disconnect_page(
     db.commit()
     
     return {"status": "disconnected"}
+
+
+@router.post("/sync")
+async def sync_facebook_leads(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Manually fetch and sync all historical leads from Meta Graph API for active page connections."""
+    conns = db.query(MetaPageConnection).filter(
+        MetaPageConnection.org_id == current_user.org_id,
+        MetaPageConnection.status == "active"
+    ).all()
+    
+    if not conns:
+        return {"status": "success", "message": "No active Meta page connections found", "sync_results": {"leads_imported": 0, "duplicates_skipped": 0, "forms_synced": 0}}
+        
+    sync_results = {
+        "forms_synced": 0,
+        "leads_imported": 0,
+        "duplicates_skipped": 0,
+        "failed_forms": 0
+    }
+    
+    async with httpx.AsyncClient() as client:
+        for conn in conns:
+            page_id = conn.page_id
+            page_access_token = conn.access_token
+            
+            # Map form IDs to form names
+            form_map = {}
+            forms_meta = conn.connected_forms or []
+            clean_form_ids = []
+            
+            if isinstance(forms_meta, list):
+                for item in forms_meta:
+                    if isinstance(item, dict):
+                        fid = str(item.get("id"))
+                        fname = item.get("name") or f"Form #{fid}"
+                    else:
+                        fid = str(item)
+                        fname = f"Form #{fid}"
+                    clean_form_ids.append(fid)
+                    form_map[fid] = fname
+
+            # If no connected forms stored, fetch all leadgen_forms for this page
+            if not clean_form_ids and page_access_token:
+                try:
+                    url_forms = f"{FB_API_BASE}/{page_id}/leadgen_forms"
+                    resp = await client.get(url_forms, params={"access_token": page_access_token, "fields": "id,name"})
+                    data = resp.json()
+                    if "data" in data:
+                        for f in data["data"]:
+                            fid = str(f["id"])
+                            fname = f.get("name") or f"Form #{fid}"
+                            clean_form_ids.append(fid)
+                            form_map[fid] = fname
+                except Exception as ex:
+                    logger.warning(f"Could not fetch forms for page {page_id}: {ex}")
+
+            seen_lead_ids = set()
+            for form_id in clean_form_ids:
+                url_leads = f"{FB_API_BASE}/{form_id}/leads"
+                params_leads = {
+                    "access_token": page_access_token,
+                    "fields": "id,created_time,field_data,campaign_name,form_id",
+                    "limit": 100
+                }
+                
+                try:
+                    form_success = True
+                    while url_leads:
+                        resp_leads = await client.get(url_leads, params=params_leads)
+                        leads_data = resp_leads.json()
+                        
+                        if "error" in leads_data:
+                            logger.error(f"Error syncing leads for form {form_id}: {leads_data['error']}")
+                            form_success = False
+                            break
+                            
+                        for l in leads_data.get("data", []):
+                            fb_lead_id = l.get("id")
+                            if not fb_lead_id or fb_lead_id in seen_lead_ids:
+                                sync_results["duplicates_skipped"] += 1
+                                continue
+                                
+                            existing = db.query(Lead).filter(
+                                Lead.fb_lead_id == fb_lead_id,
+                                Lead.org_id == current_user.org_id
+                            ).first()
+                            
+                            if existing:
+                                seen_lead_ids.add(fb_lead_id)
+                                sync_results["duplicates_skipped"] += 1
+                                continue
+                                
+                            fields = parse_field_data(l.get("field_data", []))
+                            
+                            created_at_val = None
+                            if "created_time" in l:
+                                try:
+                                    created_at_val = dateutil.parser.parse(l["created_time"])
+                                except Exception:
+                                    pass
+                            
+                            target_form_id = str(l.get("form_id") or form_id)
+                            resolved_form_name = form_map.get(target_form_id, f"Form #{target_form_id}")
+
+                            new_lead = Lead(
+                                org_id=current_user.org_id,
+                                fb_lead_id=fb_lead_id,
+                                name=fields.get("full_name") or fields.get("name") or "Meta Lead",
+                                email=fields.get("email"),
+                                phone=fields.get("phone_number"),
+                                campaign_name=l.get("campaign_name"),
+                                form_name=resolved_form_name,
+                                raw_data=l,
+                                created_at=created_at_val
+                            )
+                            db.add(new_lead)
+                            seen_lead_ids.add(fb_lead_id)
+                            sync_results["leads_imported"] += 1
+                            
+                        paging = leads_data.get("paging", {})
+                        url_leads = paging.get("next")
+                        params_leads = None
+                        
+                    if form_success:
+                        sync_results["forms_synced"] += 1
+                    else:
+                        sync_results["failed_forms"] += 1
+                        
+                except Exception as e:
+                    logger.exception(f"Exception syncing form {form_id}: {e}")
+                    sync_results["failed_forms"] += 1
+
+    db.commit()
+    return {
+        "status": "success",
+        "sync_results": sync_results
+    }
+

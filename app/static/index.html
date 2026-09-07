@@ -110,6 +110,9 @@
       </div>
 
       <div class="header-right">
+        <button class="btn btn-ghost" id="syncMetaBtn" title="Sync leads directly from Meta Ads">
+          <i data-lucide="refresh-cw"></i><span>Sync Meta</span>
+        </button>
         <button class="btn btn-ghost" id="exportBtn" title="Export to Excel">
           <i data-lucide="download"></i><span>Export</span>
         </button>
@@ -189,14 +192,14 @@
 
       <!-- ── TAB: ALL LEADS TABLE ── -->
       <div id="tab-table" class="tab-pane">
-        <div class="section-head" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div class="section-head table-section-head">
           <h2>All Leads</h2>
-          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <div class="table-actions-group">
             <div class="date-quick-chips">
-              <button class="chip active" id="chipToday" onclick="setLeadDateChip('today')">Today</button>
+              <button class="chip" id="chipToday" onclick="setLeadDateChip('today')">Today</button>
               <button class="chip" id="chipYesterday" onclick="setLeadDateChip('yesterday')">Yesterday</button>
               <button class="chip" id="chipWeek" onclick="setLeadDateChip('week')">This Week</button>
-              <button class="chip" id="chipAll" onclick="setLeadDateChip('all')">All Leads</button>
+              <button class="chip active" id="chipAll" onclick="setLeadDateChip('all')">All Leads</button>
             </div>
             <div class="date-filter-group" style="display: flex; align-items: center; gap: 8px; background: var(--bg-sec); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);">
               <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);"></i>
@@ -534,12 +537,18 @@
           <code style="font-size:11px;user-select:all;">lead-sync@crm-saas-prod.iam.gserviceaccount.com</code>
         </div>
         <div class="form-group">
+          <label>Target Campaign</label>
+          <select class="form-control" id="gsCampaignSelect">
+            <option value="">Org-wide (All Campaigns)</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Google Sheet URL <span class="req">*</span></label>
           <input type="url" class="form-control" id="gsUrl" placeholder="https://docs.google.com/spreadsheets/d/..." required>
         </div>
         <div class="form-group">
-          <label>Worksheet Name</label>
-          <input type="text" class="form-control" id="gsSheetName" value="Sheet1" placeholder="Sheet1">
+          <label>Worksheet / Tab Name <span class="req">*</span></label>
+          <input type="text" class="form-control" id="gsSheetName" value="Sheet1" placeholder="e.g. Sheet1, JulyLeads, VIP" required>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="cancelGoogleSheets">Cancel</button>
