@@ -279,9 +279,12 @@ def get_lead_stats(
 
     conversion_rate = round((converted_count / total * 100), 1) if total > 0 else 0.0
 
-    today = date.today()
+    from datetime import timedelta
+    today_utc = datetime.now(timezone.utc).date()
+    tomorrow_utc = today_utc + timedelta(days=1)
     new_today = _base_lead_query(db, current_user).filter(
-        func.date(Lead.created_at) == today
+        Lead.created_at >= datetime.combine(today_utc, datetime.min.time()).replace(tzinfo=timezone.utc),
+        Lead.created_at <  datetime.combine(tomorrow_utc, datetime.min.time()).replace(tzinfo=timezone.utc),
     ).count()
 
     campaign_rows = _base_lead_query(db, current_user).with_entities(
