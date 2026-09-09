@@ -82,6 +82,7 @@
 
 /* ─── Reset ──────────────────────────────────────────────────── */
 *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+html { overflow-x: hidden; }
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
@@ -252,6 +253,8 @@ strong { font-weight:600; }
   margin-left: var(--sidebar-w);
   flex: 1;
   min-height: 100vh;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
