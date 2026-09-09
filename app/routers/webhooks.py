@@ -151,8 +151,13 @@ async def receive_meta_lead(
                 
             try:
                 details = await fetch_lead_details(leadgen_id, access_token=access_token)
-    except Exception:
-        logger.exception("Meta webhook: failed to fetch lead details for leadgen_id=%s", leadgen_id)
+            except Exception:
+                logger.exception("Meta webhook: failed to fetch lead details for leadgen_id=%s", leadgen_id)
+                continue
+
+            if not details:
+                logger.warning("Meta webhook: empty details for leadgen_id=%s", leadgen_id)
+                continue
 
             fields = parse_field_data(details.get("field_data", []))
             
@@ -195,11 +200,13 @@ async def receive_meta_lead(
                         resolved_form_name = f.get("name") or form_id_str
                         break
 
-                    if created_at_val is None:
-                        try:
-                            created_at_val = dateutil.parser.parse(details["created_time"])
-                        except Exception:
-                            logger.debug("Failed to parse created_time for leadgen_id=%s", leadgen_id)
+            # Parse created_at from raw details
+            created_at_val = None
+            if "created_time" in details:
+                try:
+                    created_at_val = dateutil.parser.parse(details["created_time"])
+                except Exception:
+                    logger.debug("Failed to parse created_time for leadgen_id=%s", leadgen_id)
 
             lead = Lead(
                 org_id=org_id,
