@@ -720,9 +720,22 @@ async function loadCampaigns() {
   if (!state.token) return;
   try {
     state.campaigns = await api('/campaigns') || [];
+    updateCampaignMetrics();
     renderCampaignsGrid();
     loadStats();
   } catch (err) { }
+}
+
+function updateCampaignMetrics() {
+  const total   = state.campaigns.length;
+  const active  = state.campaigns.filter(c => c.is_active).length;
+  const leads   = state.campaigns.reduce((sum, c) => sum + (Number(c.lead_count) || 0), 0);
+  const sheets  = state.campaigns.reduce((sum, c) => sum + (c.google_sheets || []).length, 0);
+
+  document.getElementById('campStatTotal')  .textContent = total;
+  document.getElementById('campStatActive') .textContent = active;
+  document.getElementById('campStatLeads')  .textContent = leads;
+  document.getElementById('campStatSheets') .textContent = sheets;
 }
 
 function renderCampaignsGrid() {
@@ -738,42 +751,48 @@ function renderCampaignsGrid() {
   }
   grid.innerHTML = state.campaigns.map(c => {
     const sheetsList = (c.google_sheets || []).map(s => `
-      <div style="font-size:11.5px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:var(--bg); border:1px solid var(--border); padding:5px 8px; border-radius:6px; margin-top:4px;">
-        <div style="display:flex; align-items:center; gap:5px; overflow:hidden; text-overflow:ellipsis;">
-          <i data-lucide="file-spreadsheet" style="width:13px; height:13px; color:#0F9D58; flex-shrink:0;"></i>
-          <span style="font-weight:600; color:var(--text);">${esc(s.sheet_name)}</span>
+      <div class="campaign-sheet-item">
+        <div class="campaign-sheet-name">
+          <i data-lucide="file-spreadsheet"></i>
+          <span>${esc(s.sheet_name)}</span>
         </div>
-        <a href="${esc(s.spreadsheet_url)}" target="_blank" style="font-size:10.5px; color:var(--accent); text-decoration:underline;">View</a>
+        <a class="campaign-sheet-link" href="${esc(s.spreadsheet_url)}" target="_blank" rel="noopener">View</a>
       </div>
-    `).join('') || '<div style="font-size:11px; color:var(--text-3); font-style:italic; margin-top:4px;">No Google Sheets connected</div>';
+    `).join('') || '<div class="campaign-sheet-empty">No Google Sheets connected</div>';
 
     return `
     <div class="campaign-card">
-      <div class="campaign-card-head">
+      <div class="campaign-card-header">
         <h4>${esc(c.name)}</h4>
-        <div class="campaign-status ${c.is_active ? 'active' : 'inactive'}"></div>
+        <span class="campaign-status-badge ${c.is_active ? 'active' : 'inactive'}">${c.is_active ? 'Active' : 'Inactive'}</span>
       </div>
-      <div class="campaign-meta">
-        ${c.description ? `<div>${esc(c.description)}</div>` : ''}
-        ${c.meta_form_id ? `<div>Form ID: <code>${esc(c.meta_form_id)}</code></div>` : ''}
-        ${c.meta_ad_account_id ? `<div>Ad Account: <code>${esc(c.meta_ad_account_id)}</code></div>` : ''}
-        <div style="margin-top:10px;">
-          <div style="font-size:10px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:0.04em;">Google Sheets (${(c.google_sheets || []).length}):</div>
-          ${sheetsList}
-        </div>
+      ${c.description ? `<div class="campaign-card-description">${esc(c.description)}</div>` : ''}
+      <div class="campaign-card-meta">
+        ${c.meta_form_id ? `<div class="campaign-meta-row"><i data-lucide="form-input"></i><span>Form ID:</span><code>${esc(c.meta_form_id)}</code></div>` : ''}
+        ${c.meta_ad_account_id ? `<div class="campaign-meta-row"><i data-lucide="building-2"></i><span>Ad Account:</span><code>${esc(c.meta_ad_account_id)}</code></div>` : ''}
       </div>
-      <div class="campaign-foot" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
-        <div class="campaign-assignee">
-          <i data-lucide="user"></i>
-          <span>${esc(c.assigned_user_name || 'Unassigned')}</span>
+      <div class="campaign-card-sheets">
+        <div class="campaign-sheets-header">
+          <i data-lucide="file-spreadsheet"></i> Google Sheets (${(c.google_sheets || []).length})
         </div>
-        <span class="campaign-lead-count">${c.lead_count} leads</span>
-        <div class="campaign-actions" style="display:flex; gap:6px;">
-          <button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:11px;" onclick="openCampaignSheetModal(${c.id})">
-            <i data-lucide="file-spreadsheet" style="width:12px;height:12px;color:#0F9D58;"></i> + Sheet
+        ${sheetsList}
+      </div>
+      <div class="campaign-card-footer">
+        <div class="campaign-footer-left">
+          <div class="campaign-assignee">
+            <i data-lucide="user"></i>
+            <span>${esc(c.assigned_user_name || 'Unassigned')}</span>
+          </div>
+          <span class="campaign-lead-count">
+            <i data-lucide="users"></i>${c.lead_count} leads
+          </span>
+        </div>
+        <div class="campaign-actions">
+          <button class="btn-icon-sm sheet" onclick="openCampaignSheetModal(${c.id})" title="Connect Google Sheet">
+            <i data-lucide="file-spreadsheet"></i>
           </button>
-          <button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:11px;" onclick="editCampaign(${c.id})">
-            Reassign
+          <button class="btn-icon-sm edit" onclick="editCampaign(${c.id})" title="Edit campaign">
+            <i data-lucide="pencil"></i>
           </button>
         </div>
       </div>

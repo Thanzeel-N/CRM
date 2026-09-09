@@ -260,9 +260,42 @@
       <div id="tab-campaigns" class="tab-pane">
         <div class="section-head">
           <h2>Campaign Management</h2>
-          <button class="btn btn-primary" id="openCreateCampaignBtn">
-            <i data-lucide="plus"></i> New Campaign
-          </button>
+          <div class="section-head-actions">
+            <span class="hint">Organize leads by campaign</span>
+            <button class="btn btn-primary" id="openCreateCampaignBtn">
+              <i data-lucide="plus"></i> New Campaign
+            </button>
+          </div>
+        </div>
+        <div class="campaign-metrics" id="campaignMetrics">
+          <div class="campaign-metric-card">
+            <div class="campaign-metric-icon blue"><i data-lucide="megaphone"></i></div>
+            <div class="campaign-metric-info">
+              <span class="campaign-metric-label">Total Campaigns</span>
+              <span class="campaign-metric-value" id="campStatTotal">0</span>
+            </div>
+          </div>
+          <div class="campaign-metric-card">
+            <div class="campaign-metric-icon green"><i data-lucide="check-circle"></i></div>
+            <div class="campaign-metric-info">
+              <span class="campaign-metric-label">Active</span>
+              <span class="campaign-metric-value" id="campStatActive">0</span>
+            </div>
+          </div>
+          <div class="campaign-metric-card">
+            <div class="campaign-metric-icon purple"><i data-lucide="users"></i></div>
+            <div class="campaign-metric-info">
+              <span class="campaign-metric-label">Total Leads</span>
+              <span class="campaign-metric-value" id="campStatLeads">0</span>
+            </div>
+          </div>
+          <div class="campaign-metric-card">
+            <div class="campaign-metric-icon amber"><i data-lucide="file-spreadsheet"></i></div>
+            <div class="campaign-metric-info">
+              <span class="campaign-metric-label">Sheets Connected</span>
+              <span class="campaign-metric-value" id="campStatSheets">0</span>
+            </div>
+          </div>
         </div>
         <div class="campaigns-grid" id="campaignsGrid">
           <div class="empty-state"><i data-lucide="megaphone"></i><p>No campaigns yet. Create one to start assigning staff.</p></div>
