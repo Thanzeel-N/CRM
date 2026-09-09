@@ -170,14 +170,8 @@ document.getElementById('authTabRegister').addEventListener('click', () => {
   document.getElementById('authTabRegister').classList.add('active');
 });
 
-// Simulate Modal
-document.getElementById('openSimulateModalBtn').addEventListener('click', () => {
-  if (!state.user) { openModal('authModal'); return; }
-  populateCampaignDropdown('quickSimCampaign');
-  openModal('simulateModal');
-});
-document.getElementById('closeSimulateModal').addEventListener('click', () => closeModal('simulateModal'));
-document.getElementById('cancelSimulateModal').addEventListener('click', () => closeModal('simulateModal'));
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', doLogout);
 
 // Campaign Modal
 document.getElementById('openCreateCampaignBtn')?.addEventListener('click', () => {
@@ -721,34 +715,12 @@ document.getElementById('simulatorForm').addEventListener('submit', async e => {
   } catch (err) { toast(err.message, 'error'); }
 });
 
-document.getElementById('quickSimulateForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const campSel = document.getElementById('quickSimCampaign');
-  const campName = campSel.options[campSel.selectedIndex]?.text || 'General Campaign';
-  try {
-    const lead = await api('/leads/simulate', {
-      method: 'POST',
-      body: JSON.stringify({
-        name:          document.getElementById('quickSimName').value,
-        email:         document.getElementById('quickSimEmail').value,
-        phone:         document.getElementById('quickSimPhone').value,
-        campaign_name: campName === '— select —' ? 'General Campaign' : campName,
-        form_name:     'Quick Simulate',
-      }),
-    });
-    closeModal('simulateModal');
-    toast(`Lead "${lead.name}" added to pipeline`);
-    loadLeads();
-  } catch (err) { toast(err.message, 'error'); }
-});
-
 // ─── Campaigns ───────────────────────────────────────────────────
 async function loadCampaigns() {
   if (!state.token) return;
   try {
     state.campaigns = await api('/campaigns') || [];
     renderCampaignsGrid();
-    populateCampaignDropdown('quickSimCampaign');
     loadStats();
   } catch (err) { }
 }
