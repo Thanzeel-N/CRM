@@ -154,7 +154,6 @@ async def receive_meta_lead(
             except Exception:
                 logger.exception("Meta webhook: failed to fetch lead details for leadgen_id=%s", leadgen_id)
                 continue
-
             if not details:
                 logger.warning("Meta webhook: empty details for leadgen_id=%s", leadgen_id)
                 continue
