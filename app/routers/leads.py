@@ -81,8 +81,30 @@ async def list_lead_forms(
                 try:
                     url_forms = f"https://graph.facebook.com/v20.0/{c.page_id}/leadgen_forms"
                     resp = await client.get(url_forms, params={"access_token": c.access_token, "fields": "id,name"})
-                    data = resp.json()
-                    if "data" in data:
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+
+                    if not resp.is_success or "error" in data:
+                        err = data.get("error", {}) if isinstance(data, dict) else {}
+                        err_code = err.get("code")
+                        err_subcode = err.get("error_subcode")
+                        err_type = err.get("type")
+                        err_msg = err.get("message") or resp.text[:200]
+                        fbtrace_id = err.get("fbtrace_id")
+
+                        logger.error(
+                            "Meta leadgen_forms request failed for page_id=%s [HTTP status=%s]: code=%s, error_subcode=%s, error_type=%s, message=%s, fbtrace_id=%s",
+                            c.page_id,
+                            resp.status_code,
+                            err_code,
+                            err_subcode,
+                            err_type,
+                            err_msg,
+                            fbtrace_id
+                        )
+                    elif "data" in data:
                         for f in data["data"]:
                             fid = str(f["id"])
                             fname = f.get("name") or f"Form #{fid}"
@@ -91,8 +113,8 @@ async def list_lead_forms(
                                 page_forms_meta.append({"id": fid, "name": fname})
                         c.connected_forms = page_forms_meta
                         db.commit()
-                except Exception:
-                    pass
+                except Exception as ex:
+                    logger.warning(f"Error checking leadgen_forms for page {c.page_id}: {ex}")
 
         # Fallback for remaining unresolved numeric form IDs in DB
         unresolved_ids = set()

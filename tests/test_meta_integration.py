@@ -44,6 +44,8 @@ def setup_db():
         db.commit()
     yield
     # Cleanup leads and connections
+    from app.models import LeadStatusHistory
+    db.query(LeadStatusHistory).delete()
     db.query(Lead).delete()
     db.query(MetaPageConnection).delete()
     db.commit()
@@ -97,6 +99,8 @@ async def test_connect_page_webhook_failure():
             create_mock_response({
                 "data": [
                     {"permission": "pages_show_list", "status": "granted"},
+                    {"permission": "pages_read_engagement", "status": "granted"},
+                    {"permission": "pages_manage_metadata", "status": "granted"},
                     {"permission": "leads_retrieval", "status": "granted"}
                 ]
             }),
@@ -139,6 +143,8 @@ async def test_connect_page_successful_sync_with_pagination():
             create_mock_response({
                 "data": [
                     {"permission": "pages_show_list", "status": "granted"},
+                    {"permission": "pages_read_engagement", "status": "granted"},
+                    {"permission": "pages_manage_metadata", "status": "granted"},
                     {"permission": "leads_retrieval", "status": "granted"}
                 ]
             }),
@@ -201,6 +207,8 @@ async def test_connect_page_failed_form_sync():
             create_mock_response({
                 "data": [
                     {"permission": "pages_show_list", "status": "granted"},
+                    {"permission": "pages_read_engagement", "status": "granted"},
+                    {"permission": "pages_manage_metadata", "status": "granted"},
                     {"permission": "leads_retrieval", "status": "granted"}
                 ]
             }),

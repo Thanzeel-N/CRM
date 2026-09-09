@@ -52,11 +52,13 @@ def get_auth_url(request: Request):
                 status_code=500,
                 detail="META_CONFIG_ID is not configured"
             )
+        scope = "pages_show_list,pages_read_engagement,pages_manage_metadata,leads_retrieval"
         url = (
             f"https://www.facebook.com/v20.0/dialog/oauth?"
             f"client_id={settings.meta_app_id}"
             f"&redirect_uri={redirect_uri}"
             f"&response_type=code"
+            f"&scope={scope}"
             f"&config_id={config_id}"
         )
     return {"url": url, "redirect_uri": redirect_uri}
@@ -210,10 +212,31 @@ async def get_page_forms(
     
     async with httpx.AsyncClient() as client:
         resp = await client.get(url_forms, params=params_forms)
-        data = resp.json()
-        if "error" in data:
-            raise HTTPException(status_code=400, detail=data["error"].get("message", "Failed to fetch forms"))
-        
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+
+        if not resp.is_success or "error" in data:
+            err = data.get("error", {}) if isinstance(data, dict) else {}
+            err_code = err.get("code")
+            err_subcode = err.get("error_subcode")
+            err_type = err.get("type")
+            err_msg = err.get("message") or (resp.text[:200] if not resp.is_success else "Failed to fetch forms")
+            fbtrace_id = err.get("fbtrace_id")
+
+            logger.error(
+                "Meta leadgen_forms request failed for page_id=%s [HTTP status=%s]: code=%s, error_subcode=%s, error_type=%s, message=%s, fbtrace_id=%s",
+                page_id,
+                resp.status_code,
+                err_code,
+                err_subcode,
+                err_type,
+                err_msg,
+                fbtrace_id
+            )
+            raise HTTPException(status_code=400, detail=err_msg)
+
         forms = [{"id": f["id"], "name": f["name"], "status": f.get("status")} for f in data.get("data", [])]
         return {"forms": forms}
 
@@ -249,10 +272,11 @@ async def connect_page(
                 raise HTTPException(status_code=400, detail="Failed to verify permissions")
                 
             granted_scopes = [p["permission"] for p in perms_data.get("data", []) if p["status"] == "granted"]
-            required_scopes = ["pages_show_list", "leads_retrieval"]
+            required_scopes = ["pages_show_list", "pages_read_engagement", "pages_manage_metadata", "leads_retrieval"]
             missing_scopes = [s for s in required_scopes if s not in granted_scopes]
             
             if missing_scopes:
+                logger.error(f"Connect page verification failed. Missing required Facebook permissions: {missing_scopes}")
                 raise HTTPException(
                     status_code=403, 
                     detail=f"Missing required Facebook permissions: {', '.join(missing_scopes)}"
@@ -528,8 +552,30 @@ async def sync_facebook_leads(
                 try:
                     url_forms = f"{FB_API_BASE}/{page_id}/leadgen_forms"
                     resp = await client.get(url_forms, params={"access_token": page_access_token, "fields": "id,name"})
-                    data = resp.json()
-                    if "data" in data:
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+
+                    if not resp.is_success or "error" in data:
+                        err = data.get("error", {}) if isinstance(data, dict) else {}
+                        err_code = err.get("code")
+                        err_subcode = err.get("error_subcode")
+                        err_type = err.get("type")
+                        err_msg = err.get("message") or resp.text[:200]
+                        fbtrace_id = err.get("fbtrace_id")
+
+                        logger.error(
+                            "Meta leadgen_forms request failed for page_id=%s [HTTP status=%s]: code=%s, error_subcode=%s, error_type=%s, message=%s, fbtrace_id=%s",
+                            page_id,
+                            resp.status_code,
+                            err_code,
+                            err_subcode,
+                            err_type,
+                            err_msg,
+                            fbtrace_id
+                        )
+                    elif "data" in data:
                         for f in data["data"]:
                             fid = str(f["id"])
                             fname = f.get("name") or f"Form #{fid}"
