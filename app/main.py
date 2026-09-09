@@ -56,7 +56,7 @@ try:
         conn.execute(text("ALTER TABLE google_sheet_connections ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)"))
         conn.commit()
 except Exception:
-    pass
+    logger.debug("SQLite auto-migration: campaign_id column already exists or skipped")
 
 # ── Global exception handler ───────────────────────────────────────────────────
 @app.exception_handler(Exception)
@@ -114,3 +114,12 @@ async def favicon():
 def health_check():
     """Liveness probe — returns 200 when the server is running."""
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def catch_all(full_path: str):
+    """SPA catch-all: serve index.html for any non-API, non-static route."""
+    index_file = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"status": "Meta Lead Ads CRM API Running"}

@@ -2,6 +2,12 @@
    MetaCRM — App Logic
    ═══════════════════════════════════════════════════════════════ */
 
+// ─── Theme Init (before paint) ───────────────────────────────────
+(function() {
+  var saved = localStorage.getItem('crm_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+})();
+
 // ─── Global Error Catchers ────────────────────────────────────────
 window.onerror = function(msg, src, line, col, err) {
   console.error('[GlobalError]', msg, '\n  Source:', src, 'Line:', line, 'Col:', col, '\n  Error:', err);
@@ -28,20 +34,20 @@ const state = {
   dateFrom: null,   // 'YYYY-MM-DD' or null
   dateTo: null,
   activeChip: 'all',
+  // Theme
+  theme: localStorage.getItem('crm_theme') || 'dark',
 };
 
 // ─── API Helper ──────────────────────────────────────────────────
 async function api(path, opts = {}) {
   const method = (opts.method || 'GET').toUpperCase();
-  console.log(`[API] ${method} ${path}`);
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
   const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401) { console.warn('[API] 401 Unauthorized — logging out'); doLogout(); return null; }
+  if (res.status === 401) { toast('Session expired. Please sign in again.', 'error'); doLogout(); return null; }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const errMsg = err.detail || `HTTP ${res.status}`;
-    console.error(`[API Error] ${method} ${path} →`, res.status, errMsg, err);
     throw new Error(errMsg);
   }
   if (res.status === 204) return null;
@@ -50,6 +56,8 @@ async function api(path, opts = {}) {
 
 function toast(msg, type = 'success') {
   const el = document.createElement('div');
+  el.setAttribute('role', 'alert');
+  el.setAttribute('aria-live', 'polite');
   el.style.cssText = `
     position:fixed; bottom:24px; right:24px; z-index:9999;
     padding:12px 20px; border-radius:10px; font-size:13px; font-weight:500;
@@ -60,7 +68,8 @@ function toast(msg, type = 'success') {
   `;
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+  const duration = type === 'error' ? 5000 : 3500;
+  setTimeout(() => el.remove(), duration);
 }
 
 // ─── Auth ────────────────────────────────────────────────────────
@@ -119,20 +128,30 @@ document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
 
 // ─── Modals ──────────────────────────────────────────────────────
 function openModal(id) {
-  console.log('[Modal] Opening:', id);
   const el = document.getElementById(id);
-  if (!el) { console.warn('[Modal] Element not found:', id); return; }
+  if (!el) return;
   el.classList.add('active');
+  const firstInput = el.querySelector('input:not([type="hidden"]), select, textarea');
+  if (firstInput) setTimeout(() => firstInput.focus(), 100);
 }
 function closeModal(id) {
-  console.log('[Modal] Closing:', id);
   const el = document.getElementById(id);
-  if (!el) { console.warn('[Modal] Element not found:', id); return; }
+  if (!el) return;
   el.classList.remove('active');
 }
 
 document.querySelectorAll('.modal-backdrop').forEach(m => {
   m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); });
+});
+
+// Escape key closes active modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const activeModal = document.querySelector('.modal-backdrop.active');
+    if (activeModal) activeModal.classList.remove('active');
+    const activeDrawer = document.getElementById('leadDrawer');
+    if (activeDrawer && activeDrawer.classList.contains('active')) closeDrawer();
+  }
 });
 
 // Auth Modal buttons
@@ -191,19 +210,22 @@ function closeDrawer() {
 document.getElementById('themeToggleBtn').addEventListener('click', () => {
   const html = document.documentElement;
   const isDark = html.getAttribute('data-theme') === 'dark';
-  html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  const newTheme = isDark ? 'light' : 'dark';
+  html.setAttribute('data-theme', newTheme);
+  state.theme = newTheme;
+  localStorage.setItem('crm_theme', newTheme);
   document.getElementById('themeIcon').setAttribute('data-lucide', isDark ? 'sun' : 'moon');
   lucide.createIcons();
+  if (state.leads.length > 0) renderCharts();
 });
 
-// Sidebar toggle (mobile)
-document.getElementById('sidebarToggleBtn')?.addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('open');
-});
+// Sidebar toggle (mobile) — removed top-level duplicate, handled in DOMContentLoaded
 
 // ─── Login / Register ─────────────────────────────────────────────
 document.getElementById('loginForm').addEventListener('submit', async e => {
   e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Signing in...'; lucide.createIcons(); }
   try {
     const data = await api('/auth/login', {
       method: 'POST',
@@ -216,11 +238,14 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
     closeModal('authModal');
     toast(`Welcome back, ${data.user.name}!`);
     loadAll();
-  } catch (err) { console.error('[Login Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="log-in"></i> Sign In'; lucide.createIcons(); } }
 });
 
 document.getElementById('registerForm').addEventListener('submit', async e => {
   e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Creating...'; lucide.createIcons(); }
   try {
     const data = await api('/auth/register', {
       method: 'POST',
@@ -235,7 +260,8 @@ document.getElementById('registerForm').addEventListener('submit', async e => {
     closeModal('authModal');
     toast(`Account created! Welcome, ${data.user.name}!`);
     loadAll();
-  } catch (err) { console.error('[Register Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="building"></i> Create Account'; lucide.createIcons(); } }
 });
 
 // ─── Leads ───────────────────────────────────────────────────────
@@ -313,7 +339,7 @@ async function loadLeads() {
     renderTable(state.leads, state.totalLeads);
     renderPagination();
     loadStats();
-  } catch (err) { console.error('Load leads failed:', err); }
+  } catch (err) { toast('Load leads failed: ' + err.message, 'error'); }
 }
 
 
@@ -342,9 +368,8 @@ async function loadStats() {
         if (String(cVal) === current) opt.selected = true;
         sel.appendChild(opt);
       });
-    } catch (e) { console.error('Campaign filter load failed', e); }
-
-    // Populate form filter
+    } catch (e) { }
+    // form filter
     try {
       const forms = await api('/leads/forms') || [];
       const formSel = document.getElementById('formFilterSelect');
@@ -359,9 +384,9 @@ async function loadStats() {
         if (fVal === currentForm) opt.selected = true;
         formSel.appendChild(opt);
       });
-    } catch (e) { console.error('Forms fetch failed', e); }
+    } catch (e) { }
 
-  } catch (err) { console.error('Stats failed:', err); }
+  } catch (err) { }
 }
 
 function renderKanban(leads) {
@@ -509,10 +534,7 @@ function renderTable(leads, total) {
         </tr>
       `;
       return rowHtml;
-    } catch (err) {
-      console.error('[renderTable] Failed to render row for lead ID:', l?.id, err);
-      return '';
-    }
+    } catch (err) { }
   }).join('');
 
   lucide.createIcons();
@@ -626,9 +648,13 @@ document.getElementById('drawerStatusSelect').addEventListener('change', async f
       body: JSON.stringify({ status: this.value }),
     });
     state.activeLead = updated;
-    loadLeads();
-    toast('Status updated ✓');
-  } catch (err) { console.error('[UpdateStatus Error]', err); toast(err.message, 'error'); }
+    // Optimistic local state update
+    const idx = state.leads.findIndex(l => l.id === updated.id);
+    if (idx !== -1) state.leads[idx] = updated;
+    renderKanban(state.leads);
+    renderTable(state.leads, state.totalLeads);
+    toast('Status updated');
+  } catch (err) { toast(err.message, 'error'); }
 });
 
 // Save notes
@@ -640,8 +666,8 @@ document.getElementById('saveNotesBtn').addEventListener('click', async () => {
       method: 'PATCH',
       body: JSON.stringify({ status: state.activeLead.status, notes }),
     });
-    toast('Notes saved ✓');
-  } catch (err) { console.error('[AssignLead Error]', err); toast(err.message, 'error'); }
+    toast('Notes saved');
+  } catch (err) { toast(err.message, 'error'); }
 });
 
 // WhatsApp chat — DISABLED (WhatsApp integration not configured)
@@ -671,8 +697,6 @@ document.getElementById('formFilterSelect').addEventListener('change', () => {
   state.currentPage = 0;
   loadLeads();
 });
-
-// ─── Export ───────────────────────────────────────────────────────
 document.getElementById('exportBtn').addEventListener('click', () => {
   if (!state.token) { toast('Please sign in first', 'error'); return; }
   window.open('/leads/export/excel', '_blank');
@@ -692,9 +716,9 @@ document.getElementById('simulatorForm').addEventListener('submit', async e => {
         form_name:     document.getElementById('simForm').value,
       }),
     });
-    toast(`Lead "${lead.name}" created in pipeline ✓`);
+    toast(`Lead "${lead.name}" created in pipeline`);
     loadLeads();
-  } catch (err) { console.error('[AddCampaign Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
 });
 
 document.getElementById('quickSimulateForm').addEventListener('submit', async e => {
@@ -713,9 +737,9 @@ document.getElementById('quickSimulateForm').addEventListener('submit', async e 
       }),
     });
     closeModal('simulateModal');
-    toast(`Lead "${lead.name}" added to pipeline ✓`);
+    toast(`Lead "${lead.name}" added to pipeline`);
     loadLeads();
-  } catch (err) { console.error('[EditCampaign Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
 });
 
 // ─── Campaigns ───────────────────────────────────────────────────
@@ -726,7 +750,7 @@ async function loadCampaigns() {
     renderCampaignsGrid();
     populateCampaignDropdown('quickSimCampaign');
     loadStats();
-  } catch (err) { console.error('Campaigns load failed:', err); }
+  } catch (err) { }
 }
 
 function renderCampaignsGrid() {
@@ -801,14 +825,17 @@ async function editCampaign(id) {
   document.getElementById('campFormId').value      = campaign.meta_form_id || '';
   document.getElementById('campAdAccountId').value = campaign.meta_ad_account_id || '';
 
-  // Store editing id
   document.getElementById('createCampaignForm').dataset.editId = id;
+  document.getElementById('createCampaignTitle').textContent = 'Edit Campaign';
+  document.querySelector('#createCampaignForm button[type="submit"] span, #createCampaignForm button[type="submit"] i')?.closest('button[type="submit"]')?.querySelectorAll('span').forEach(s => { if (s.textContent.includes('Create')) s.textContent = 'Update Campaign'; });
   openModal('createCampaignModal');
 }
 
 document.getElementById('createCampaignForm').addEventListener('submit', async e => {
   e.preventDefault();
   const editId = e.target.dataset.editId;
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Saving...'; lucide.createIcons(); }
   const payload = {
     name:                document.getElementById('campName').value,
     description:         document.getElementById('campDesc').value || null,
@@ -819,16 +846,22 @@ document.getElementById('createCampaignForm').addEventListener('submit', async e
   try {
     if (editId) {
       await api(`/campaigns/${editId}`, { method:'PATCH', body: JSON.stringify(payload) });
-      toast('Campaign updated ✓');
+      toast('Campaign updated');
     } else {
       await api('/campaigns', { method:'POST', body: JSON.stringify(payload) });
-      toast('Campaign created ✓');
+      toast('Campaign created');
     }
     delete e.target.dataset.editId;
     e.target.reset();
+    document.getElementById('createCampaignTitle').textContent = 'New Campaign';
+    if (btn) {
+      const span = btn.querySelector('span');
+      if (span) span.textContent = 'Create Campaign';
+    }
     closeModal('createCampaignModal');
     loadCampaigns();
-  } catch (err) { console.error('[AddStaff Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; lucide.createIcons(); } }
 });
 
 // ─── Staff ───────────────────────────────────────────────────────
@@ -837,7 +870,7 @@ async function loadStaff() {
   try {
     state.staff = await api('/staff') || [];
     renderStaffTable();
-  } catch (err) { console.error('Staff load failed:', err); }
+  } catch (err) { }
 }
 
 function renderStaffTable() {
@@ -871,18 +904,20 @@ async function deactivateStaff(id) {
     await api(`/staff/${id}/deactivate`, { method:'PATCH' });
     toast('Staff member deactivated');
     loadStaff();
-  } catch (err) { console.error('[UpdateStaff Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 async function activateStaff(id) {
   try {
     await api(`/staff/${id}/activate`, { method:'PATCH' });
-    toast('Staff member activated ✓');
+    toast('Staff member activated');
     loadStaff();
-  } catch (err) { console.error('[DeleteStaff Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 document.getElementById('inviteStaffForm').addEventListener('submit', async e => {
   e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Sending...'; lucide.createIcons(); }
   try {
     const data = await api('/staff/invite', {
       method: 'POST',
@@ -893,12 +928,13 @@ document.getElementById('inviteStaffForm').addEventListener('submit', async e =>
         role:     document.getElementById('staffRole').value,
       }),
     });
-    toast(`${data.name} invited successfully ✓`);
+    toast(`${data.name} invited successfully`);
     e.target.reset();
     closeModal('inviteStaffModal');
     loadStaff();
-    loadCampaigns(); // refresh assignment dropdowns
-  } catch (err) { console.error('[ExportLeads Error]', err); toast(err.message, 'error'); }
+    loadCampaigns();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="user-plus"></i> Send Invite'; lucide.createIcons(); } }
 });
 
 // ─── Integrations & Lead Sources ─────────────────────────────────
@@ -929,7 +965,7 @@ async function loadIntegrations() {
           <div class="connect-new-card" style="border: 1px solid var(--accent);">
             <div class="connect-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1877F2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-facebook"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></div>
             <div class="connect-info">
-              <h3 style="display:flex; align-items:center; gap:8px;">Facebook Lead Ads <span class="pill active" style="font-size:10px;">✓ Connected</span></h3>
+              <h3 style="display:flex; align-items:center; gap:8px;">Facebook Lead Ads <span class="pill active" style="font-size:10px;">Connected</span></h3>
               <p style="margin-bottom:8px;">Receiving leads from <strong>${esc(c.page_name)}</strong></p>
               <div style="font-size:12px; color:var(--text-3);">
                 Lead Forms: ${c.connected_forms.length} connected
@@ -941,7 +977,7 @@ async function loadIntegrations() {
           </div>
         `;
       });
-    } catch(e) { console.error('FB Conns failed', e); }
+    } catch(e) { }
     
     // 2. Fetch Google Sheets Connections
     try {
@@ -967,7 +1003,7 @@ async function loadIntegrations() {
           </div>
         `;
       });
-    } catch (e) { console.error('GS Connections failed', e); }
+    } catch (e) { }
 
     if (html) {
       list.innerHTML = html;
@@ -977,20 +1013,19 @@ async function loadIntegrations() {
     const dot = document.querySelector('.badge-dot');
     const statusText = document.getElementById('connectionStatus');
     if (dot) { dot.className = `badge-dot ${isMetaConnected ? 'connected' : 'disconnected'}`; }
-    if (statusText) statusText.textContent = isMetaConnected ? 'Connected ✓' : 'Not Connected';
+    if (statusText) statusText.textContent = isMetaConnected ? 'Connected' : 'Not Connected';
 
-  } catch (err) { console.error('Integrations failed:', err); }
+  } catch (err) { }
 }
 
 window.deleteGoogleSheetConn = async function(connId) {
   if (!confirm('Remove this Google Sheet connection? Leads will no longer sync to this worksheet.')) return;
   try {
     await api(`/integrations/google-sheets/connections/${connId}`, { method: 'DELETE' });
-    toast('Google Sheet connection removed ✓');
+    toast('Google Sheet connection removed');
     loadIntegrations();
     loadCampaigns();
   } catch (err) {
-    console.error('Delete Google Sheet conn error:', err);
     toast('Failed to remove connection: ' + err.message, 'error');
   }
 };
@@ -1006,6 +1041,8 @@ document.getElementById('cancelGoogleSheets')?.addEventListener('click', () => c
 
 document.getElementById('googleSheetsForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Connecting...'; lucide.createIcons(); }
   const campVal = document.getElementById('gsCampaignSelect').value;
   const payload = {
     spreadsheet_url: document.getElementById('gsUrl').value,
@@ -1014,15 +1051,29 @@ document.getElementById('googleSheetsForm')?.addEventListener('submit', async (e
   };
   try {
     await api('/integrations/google-sheets/connect', { method: 'POST', body: JSON.stringify(payload) });
-    toast('Google Sheet Connected! Leads will now sync automatically. ✓');
+    toast('Google Sheet Connected! Leads will now sync automatically.');
     closeModal('googleSheetsModal');
     loadIntegrations();
     loadCampaigns();
-  } catch (err) { console.error('[GoogleSheets Error]', err); toast(err.message, 'error'); }
+  } catch (err) { toast(err.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="file-spreadsheet"></i> Connect Sheet'; lucide.createIcons(); } }
 });
 
 // ─── Charts ──────────────────────────────────────────────────────
 document.getElementById('analyticsDateRange')?.addEventListener('change', renderCharts);
+
+function getChartColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return {
+    borderColor: isDark ? '#1e2433' : '#ffffff',
+    legendColor: isDark ? '#8b95ad' : '#4b5568',
+    axisColor: isDark ? '#8b95ad' : '#4b5568',
+    gridColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)',
+    pointBg: isDark ? '#1e2433' : '#ffffff',
+    tooltipBg: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+    tooltipText: isDark ? '#f0f4ff' : '#111827',
+  };
+}
 
 function renderCharts() {
   if (!state.leads.length) return;
@@ -1066,6 +1117,7 @@ function renderCharts() {
   const colors = { new:'#3b82f6', contacted:'#f59e0b', qualified:'#8b5cf6', converted:'#10b981', lost:'#ef4444' };
 
   if (state.statusChart) state.statusChart.destroy();
+  const cc = getChartColors();
   state.statusChart = new Chart(document.getElementById('statusChart'), {
     type: 'doughnut',
     data: {
@@ -1074,15 +1126,15 @@ function renderCharts() {
         data: Object.values(statusCounts), 
         backgroundColor: Object.values(colors), 
         borderWidth: 2,
-        borderColor: '#1e2433', // Match dark background
+        borderColor: cc.borderColor,
         hoverOffset: 4
       }],
     },
     options: { 
       responsive: true, 
-      cutout: '75%', // Thinner ring for modern look
+      cutout: '75%',
       plugins: { 
-        legend: { position:'bottom', labels: { color: '#8b95ad', font: { size: 13, family: 'Inter' }, padding: 20 } } 
+        legend: { position:'bottom', labels: { color: cc.legendColor, font: { size: 13, family: 'Inter' }, padding: 20 } } 
       } 
     },
   });
@@ -1104,9 +1156,9 @@ function renderCharts() {
         borderColor: '#6366f1', 
         backgroundColor: gradient,
         borderWidth: 3,
-        tension: 0.4, // Smooth curves
+        tension: 0.4,
         fill: true,
-        pointBackgroundColor: '#1e2433',
+        pointBackgroundColor: cc.pointBg,
         pointBorderColor: '#6366f1',
         pointBorderWidth: 2,
         pointRadius: 4,
@@ -1117,15 +1169,17 @@ function renderCharts() {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { ticks: { color: '#8b95ad', font: { family: 'Inter' } }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: '#8b95ad', font: { family: 'Inter' }, stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)', borderDash: [5, 5] } },
+        x: { ticks: { color: cc.axisColor, font: { family: 'Inter' } }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: cc.axisColor, font: { family: 'Inter' }, stepSize: 1 }, grid: { color: cc.gridColor, borderDash: [5, 5] } },
       },
       plugins: { 
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(15, 23, 42, 0.9)',
+          backgroundColor: cc.tooltipBg,
           titleFont: { size: 13, family: 'Inter' },
           bodyFont: { size: 14, family: 'Inter', weight: 'bold' },
+          titleColor: cc.tooltipText,
+          bodyColor: cc.tooltipText,
           padding: 12,
           cornerRadius: 8,
           displayColors: false
@@ -1142,7 +1196,7 @@ function renderCharts() {
 // ─── Helpers ─────────────────────────────────────────────────────
 function esc(str) {
   if (!str) return '';
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function populateCampaignDropdown(selectId, selectedVal) {
@@ -1171,14 +1225,13 @@ async function populateStaffDropdown(selectId, selectedVal) {
 function copyText(elId) {
   const el = document.getElementById(elId);
   if (!el) return;
-  navigator.clipboard.writeText(el.textContent).then(() => toast('Copied to clipboard ✓'));
+  navigator.clipboard.writeText(el.textContent).then(() => toast('Copied to clipboard'));
 }
 
 // ─── Initialise ───────────────────────────────────────────────────
 async function loadAll() {
   updateUserUI();
   if (state.token) {
-    // Default to All Leads on load so all historical leads display sorted by date descending
     state.dateFrom = null;
     state.dateTo   = null;
     state.activeChip = 'all';
@@ -1186,9 +1239,7 @@ async function loadAll() {
       document.getElementById(id)?.classList.remove('active');
     });
     document.getElementById('chipAll')?.classList.add('active');
-    await loadCampaigns();
-    await loadLeads();
-    await loadIntegrations();
+    await Promise.all([loadCampaigns(), loadLeads(), loadIntegrations()]);
   }
 }
 
@@ -1208,7 +1259,6 @@ document.getElementById('btnConnectFacebook')?.addEventListener('click', async (
     const top = (window.innerHeight - height) / 2;
     window.open(url, 'fb_oauth', `width=${width},height=${height},top=${top},left=${left}`);
   } catch (err) {
-    console.error('[FbConnect Error]', err);
     toast('Could not start Facebook connection: ' + err.message, 'error');
   }
 });
@@ -1258,7 +1308,6 @@ async function exchangeFbToken(code) {
     openModal('fbPageModal');
     
   } catch (err) {
-    console.error('[ExchangeToken Error]', err);
     toast('Failed to exchange token: ' + err.message, 'error');
   }
 }
@@ -1303,7 +1352,6 @@ document.getElementById('btnContinueFbForms')?.addEventListener('click', async (
     }
     openModal('fbFormsModal');
   } catch (err) {
-    console.error('[FetchForms Error]', err);
     toast('Failed to fetch forms: ' + err.message, 'error');
   }
 });
@@ -1332,11 +1380,10 @@ document.getElementById('btnCompleteFbConnect')?.addEventListener('click', async
       })
     });
     closeModal('fbFormsModal');
-    toast('Facebook Page successfully connected! ✓', 'success');
+    toast('Facebook Page successfully connected!', 'success');
     tempFbSession = null;
     loadIntegrations();
   } catch(err) {
-    console.error('[CompleteFbConnect Error]', err);
     toast('Connection failed: ' + err.message, 'error');
   }
 });
@@ -1359,7 +1406,6 @@ function openManageMeta(connId, pageId, pageName, formsJson) {
         closeModal('manageMetaModal');
         loadIntegrations();
       } catch (e) {
-        console.error('[Disconnect Error]', e);
         toast('Failed to disconnect: ' + e.message, 'error');
       }
     }
@@ -1374,7 +1420,6 @@ window.disconnectMetaCard = async function(connId) {
       toast('Facebook account disconnected successfully', 'success');
       loadIntegrations();
     } catch (e) {
-      console.error('[DisconnectCard Error]', e);
       toast('Failed to disconnect: ' + e.message, 'error');
     }
   }
@@ -1412,7 +1457,6 @@ async function syncMetaLeads() {
     loadLeads();
     loadStats();
   } catch (err) {
-    console.error('Meta sync failed:', err);
     toast('Meta sync failed: ' + err.message, 'error');
   } finally {
     if (btn) {
@@ -1486,33 +1530,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Filter change listeners
-  const campaignSel = document.getElementById('campaignFilterSelect');
-  const formSel = document.getElementById('formFilterSelect');
-  const searchInput = document.getElementById('searchInput');
-
-  if (campaignSel) {
-    campaignSel.addEventListener('change', () => {
-      state.currentPage = 0;
-      loadLeads();
-    });
-  }
-  if (formSel) {
-    formSel.addEventListener('change', () => {
-      state.currentPage = 0;
-      loadLeads();
-    });
-  }
-  if (searchInput) {
-    let searchDebounce = null;
-    searchInput.addEventListener('input', () => {
-      clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => {
-        state.currentPage = 0;
-        loadLeads();
-      }, 300);
-    });
-  }
+  // Filter change listeners — only register once here, removed top-level duplicates
 
   loadAll();
 
@@ -1521,7 +1539,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (urlParams.get('meta_connected') === 'true') {
     const pagesCount = urlParams.get('pages') || '1';
     setTimeout(() => {
-      toast(`Successfully connected ${pagesCount} Facebook Page(s)! ✓`);
+      toast(`Successfully connected ${pagesCount} Facebook Page(s)!`);
       // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
       // Ensure Lead Sources tab is active

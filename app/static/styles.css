@@ -23,6 +23,10 @@
   --text-2:    #8b95ad;
   --text-3:    #4b5568;
 
+  --text-main: #f0f4ff;
+  --text-sec:  #8b95ad;
+  --bg-sec:    rgba(17, 24, 39, 0.85);
+
   --blue:      #3b82f6;
   --blue-bg:   rgba(59,130,246,0.12);
   --green:     #10b981;
@@ -67,6 +71,10 @@
   --text:      #111827;
   --text-2:    #4b5568;
   --text-3:    #9ca3af;
+
+  --text-main: #111827;
+  --text-sec:  #4b5568;
+  --bg-sec:    rgba(255,255,255,0.85);
   --shadow-s:  0 1px 3px rgba(0,0,0,0.07);
   --shadow-m:  0 4px 12px rgba(0,0,0,0.08);
   --shadow-l:  0 12px 32px rgba(0,0,0,0.1);
@@ -550,8 +558,6 @@ strong { font-weight:600; }
   white-space: nowrap;
   table-layout: auto;
 }
-.data-table thead {
-}
 .data-table th {
   position: sticky;
   top: 0;
@@ -958,6 +964,80 @@ select.form-control { cursor: pointer; appearance: auto; }
 .spin {
   animation: spin 1s linear infinite;
 }
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-3) 25%, var(--border) 50%, var(--bg-3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-s);
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Kanban scroll hint */
+@media (max-width: 1200px) and (min-width: 901px) {
+  .kanban-board { position: relative; }
+  .kanban-board::after {
+    content: '';
+    position: sticky;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    background: linear-gradient(to right, transparent, var(--bg-2));
+    pointer-events: none;
+    z-index: 1;
+  }
+}
+
+/* Empty state for table rows */
+.empty-row-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-3);
+}
+.empty-row-state svg {
+  width: 40px;
+  height: 40px;
+  opacity: 0.3;
+  margin-bottom: 12px;
+}
+.empty-row-state p {
+  font-size: 13px;
+}
+
+/* Date filter group */
+.date-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-sec);
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.date-filter-group .form-control {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  font-size: 13px;
+  color: var(--text-main);
+  width: 160px;
+  height: auto;
+}
+
+/* Section head responsive */
+.table-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
@@ -1154,6 +1234,7 @@ select.form-control { cursor: pointer; appearance: auto; }
 /* --- Quick Chips -------------------------------------------------- */
 .date-quick-chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   background: var(--bg-sec);
   padding: 4px;

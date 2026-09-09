@@ -4,8 +4,9 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 import httpx
 import jwt
+import json
+from datetime import datetime, timedelta, timezone
 import dateutil.parser
-from datetime import datetime, timedelta
 
 import logging
 
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/integrations/facebook", tags=["facebook"])
 FB_API_BASE = "https://graph.facebook.com/v20.0"
 
 def create_fb_session_token(user_access_token: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=60)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=60)
     to_encode = {"exp": expire, "user_access_token": user_access_token}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -67,19 +68,21 @@ def oauth_callback(code: Optional[str] = None, error: Optional[str] = None, erro
     back to our frontend SPA popup opener, then closes the window.
     """
     if error:
+        safe_error = json.dumps(error_description or "Unknown error")
         return f"""
         <html><body>
         <script>
-            window.opener.postMessage({{ type: 'FB_OAUTH_ERROR', error: '{error_description}' }}, '*');
+            window.opener.postMessage({{ type: 'FB_OAUTH_ERROR', error: {safe_error} }}, '*');
             window.close();
         </script>
         </body></html>
         """
     if code:
+        safe_code = json.dumps(code)
         return f"""
         <html><body>
         <script>
-            window.opener.postMessage({{ type: 'FB_OAUTH_SUCCESS', code: '{code}' }}, '*');
+            window.opener.postMessage({{ type: 'FB_OAUTH_SUCCESS', code: {safe_code} }}, '*');
             window.close();
         </script>
         </body></html>
@@ -578,7 +581,7 @@ async def sync_facebook_leads(
                                 try:
                                     created_at_val = dateutil.parser.parse(l["created_time"])
                                 except Exception:
-                                    pass
+                                    logger.debug("Failed to parse created_time for lead %s", fb_lead_id)
                             
                             target_form_id = str(l.get("form_id") or form_id)
                             resolved_form_name = form_map.get(target_form_id, f"Form #{target_form_id}")

@@ -2,7 +2,9 @@ import hashlib
 import hmac
 import json
 import logging
+
 import dateutil.parser
+from sqlalchemy import or_, and_
 
 import gspread
 from fastapi import APIRouter, Request, Response, Depends, HTTPException, BackgroundTasks
@@ -65,7 +67,7 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
         sheet.append_row(row)
         logger.info("Synced lead '%s' to Google Sheet %s/%s", lead.name, sheet_id, sheet_name)
     except Exception:
-        logger.exception("Failed to sync lead '%s' to Google Sheet %s", lead.name, sheet_id)
+        logger.exception("Google Sheets sync failed for lead '%s' to Google Sheet %s", lead.name, sheet_id)
 
 
 # ---------- META LEAD ADS ----------
@@ -149,9 +151,8 @@ async def receive_meta_lead(
                 
             try:
                 details = await fetch_lead_details(leadgen_id, access_token=access_token)
-            except Exception:
-                logger.exception("Failed to fetch lead details for leadgen_id=%s", leadgen_id)
-                continue
+    except Exception:
+        logger.exception("Meta webhook: failed to fetch lead details for leadgen_id=%s", leadgen_id)
 
             fields = parse_field_data(details.get("field_data", []))
             
@@ -160,7 +161,6 @@ async def receive_meta_lead(
             email = fields.get("email")
             campaign_name = details.get("campaign_name")
             
-            from sqlalchemy import or_, and_
             duplicate_conds = []
             if phone:
                 duplicate_conds.append(and_(Lead.phone != None, Lead.phone != "", Lead.phone == phone))
@@ -195,12 +195,11 @@ async def receive_meta_lead(
                         resolved_form_name = f.get("name") or form_id_str
                         break
 
-            created_at_val = None
-            if "created_time" in details:
-                try:
-                    created_at_val = dateutil.parser.parse(details["created_time"])
-                except Exception:
-                    pass
+                    if created_at_val is None:
+                        try:
+                            created_at_val = dateutil.parser.parse(details["created_time"])
+                        except Exception:
+                            logger.debug("Failed to parse created_time for leadgen_id=%s", leadgen_id)
 
             lead = Lead(
                 org_id=org_id,

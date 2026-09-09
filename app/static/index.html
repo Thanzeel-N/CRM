@@ -76,7 +76,7 @@
           <span class="user-name" id="sidebarUserName">Sign In</span>
           <span class="user-role" id="sidebarUserRole">—</span>
         </div>
-        <i data-lucide="chevron-right" style="width:14px;opacity:.4;"></i>
+        <i data-lucide="chevron-right" style="width:14px;opacity:.4;" aria-hidden="true"></i>
       </button>
     </div>
   </aside>
@@ -87,7 +87,7 @@
     <!-- TOP HEADER -->
     <header class="top-header">
       <div class="header-left">
-        <button class="btn-icon" id="sidebarToggleBtn" style="display:none;">
+        <button class="btn-icon" id="sidebarToggleBtn" aria-label="Toggle sidebar" style="display:none;">
           <i data-lucide="menu"></i>
         </button>
         <div class="page-title">
@@ -119,7 +119,7 @@
         <button class="btn btn-primary" id="openSimulateModalBtn">
           <i data-lucide="plus"></i><span>Simulate Lead</span>
         </button>
-        <button class="btn-icon" id="themeToggleBtn" title="Toggle theme">
+        <button class="btn-icon" id="themeToggleBtn" title="Toggle theme" aria-label="Toggle theme">
           <i data-lucide="moon" id="themeIcon"></i>
         </button>
       </div>
@@ -201,9 +201,9 @@
               <button class="chip" id="chipWeek" onclick="setLeadDateChip('week')">This Week</button>
               <button class="chip active" id="chipAll" onclick="setLeadDateChip('all')">All Leads</button>
             </div>
-            <div class="date-filter-group" style="display: flex; align-items: center; gap: 8px; background: var(--bg-sec); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);">
-              <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);"></i>
-              <input type="text" id="leadsDateFilter" class="form-control" placeholder="Custom range…" style="border: none; background: transparent; padding: 4px; font-size: 13px; color: var(--text-main); width: 160px;">
+            <div class="date-filter-group">
+              <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);" aria-hidden="true"></i>
+              <input type="text" id="leadsDateFilter" class="form-control" placeholder="Custom range…">
             </div>
             <button class="btn btn-secondary" id="btnPrintLeads">
               <i data-lucide="printer"></i> Print List
@@ -233,11 +233,11 @@
 
       <!-- ── TAB: ANALYTICS ── -->
       <div id="tab-analytics" class="tab-pane">
-        <div class="section-head" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div class="section-head analytics-section-head">
           <h2>Analytics</h2>
-          <div class="date-filter-group" style="display: flex; align-items: center; gap: 8px; background: var(--bg-sec); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);">
-            <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);"></i>
-            <input type="text" id="analyticsDateRange" class="form-control" placeholder="Select Date Range" style="border: none; background: transparent; padding: 4px; font-size: 13px; color: var(--text-main); width: 220px;">
+          <div class="date-filter-group">
+            <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--text-sec);" aria-hidden="true"></i>
+            <input type="text" id="analyticsDateRange" class="form-control" placeholder="Select Date Range" style="width: 220px;">
           </div>
         </div>
         <div class="charts-grid">
@@ -387,20 +387,21 @@
         <h2 id="drawerLeadName">Lead Details</h2>
         <span id="drawerLeadTime" class="hint"></span>
       </div>
-      <button class="btn-icon" id="closeDrawerBtn"><i data-lucide="x"></i></button>
+      <button class="btn-icon" id="closeDrawerBtn" aria-label="Close lead details"><i data-lucide="x"></i></button>
     </div>
     <div class="drawer-body">
       <div class="detail-section">
         <p class="detail-label">Contact Info</p>
         <div class="detail-grid">
-          <div class="detail-item"><i data-lucide="mail"></i><span id="drawerLeadEmail">—</span></div>
-          <div class="detail-item"><i data-lucide="phone"></i><span id="drawerLeadPhone">—</span></div>
-          <div class="detail-item"><i data-lucide="megaphone"></i><span id="drawerLeadCampaign">—</span></div>
-          <div class="detail-item"><i data-lucide="hash"></i><code id="drawerLeadMetaId" style="font-size:11px;">—</code></div>
+          <div class="detail-item"><i data-lucide="mail" aria-hidden="true"></i><span id="drawerLeadEmail">—</span></div>
+          <div class="detail-item"><i data-lucide="phone" aria-hidden="true"></i><span id="drawerLeadPhone">—</span></div>
+          <div class="detail-item"><i data-lucide="megaphone" aria-hidden="true"></i><span id="drawerLeadCampaign">—</span></div>
+          <div class="detail-item"><i data-lucide="hash" aria-hidden="true"></i><code id="drawerLeadMetaId" style="font-size:11px;">—</code></div>
         </div>
+      </div>
       <div class="detail-section">
         <p class="detail-label" style="display:flex;align-items:center;justify-content:space-between;">
-          <span><i data-lucide="file-text" style="width:14px;height:14px;margin-right:4px;"></i> Form Responses</span>
+          <span><i data-lucide="file-text" style="width:14px;height:14px;margin-right:4px;" aria-hidden="true"></i> Form Responses</span>
           <span id="drawerFormNameBadge" class="lead-tag" style="font-size:11px;">Form</span>
         </p>
         <div id="drawerFormAnswers" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
@@ -446,11 +447,11 @@
   </aside>
 
   <!-- ════════════ MODAL: CREATE CAMPAIGN ════════════ -->
-  <div class="modal-backdrop" id="createCampaignModal">
+  <div class="modal-backdrop" id="createCampaignModal" role="dialog" aria-modal="true" aria-labelledby="createCampaignTitle">
     <div class="modal-box">
       <div class="modal-head">
-        <h3>New Campaign</h3>
-        <button class="btn-icon" id="closeCreateCampaignModal"><i data-lucide="x"></i></button>
+        <h3 id="createCampaignTitle">New Campaign</h3>
+        <button class="btn-icon" id="closeCreateCampaignModal" aria-label="Close campaign modal"><i data-lucide="x"></i></button>
       </div>
       <form id="createCampaignForm">
         <div class="form-group">
@@ -486,11 +487,11 @@
   </div>
 
   <!-- ════════════ MODAL: INVITE STAFF ════════════ -->
-  <div class="modal-backdrop" id="inviteStaffModal">
+  <div class="modal-backdrop" id="inviteStaffModal" role="dialog" aria-modal="true" aria-labelledby="inviteStaffTitle">
     <div class="modal-box">
       <div class="modal-head">
         <h3>Invite Staff Member</h3>
-        <button class="btn-icon" id="closeInviteStaffModal"><i data-lucide="x"></i></button>
+        <button class="btn-icon" id="closeInviteStaffModal" aria-label="Close invite staff modal"><i data-lucide="x"></i></button>
       </div>
       <form id="inviteStaffForm">
         <div class="form-row">
@@ -513,7 +514,7 @@
           </div>
           <div class="form-group">
             <label>Temporary Password <span class="req">*</span></label>
-            <input type="password" class="form-control" id="staffPassword" placeholder="Min 6 chars" required>
+            <input type="password" class="form-control" id="staffPassword" placeholder="Min 6 chars" required minlength="6">
           </div>
         </div>
         <div class="modal-actions">
@@ -525,11 +526,11 @@
   </div>
 
   <!-- ════════════ MODAL: GOOGLE SHEETS ════════════ -->
-  <div class="modal-backdrop" id="googleSheetsModal">
+  <div class="modal-backdrop" id="googleSheetsModal" role="dialog" aria-modal="true" aria-labelledby="googleSheetsTitle">
     <div class="modal-box">
       <div class="modal-head">
         <h3>Connect Google Sheet</h3>
-        <button class="btn-icon" id="closeGoogleSheetsModal"><i data-lucide="x"></i></button>
+        <button class="btn-icon" id="closeGoogleSheetsModal" aria-label="Close Google Sheets modal"><i data-lucide="x"></i></button>
       </div>
       <form id="googleSheetsForm">
         <div class="demo-hint" style="margin-bottom:16px;">
@@ -559,11 +560,11 @@
   </div>
 
   <!-- ════════════ MODAL: FB PAGE SELECTION ════════════ -->
-  <div class="modal-backdrop" id="fbPageModal">
+  <div class="modal-backdrop" id="fbPageModal" role="dialog" aria-modal="true" aria-labelledby="fbPageTitle">
     <div class="modal-box" style="max-width:500px;">
       <div class="modal-head">
-        <h3>Select Facebook Page</h3>
-        <button class="btn-icon" id="closeFbPageModal"><i data-lucide="x"></i></button>
+        <h3 id="fbPageTitle">Select Facebook Page</h3>
+        <button class="btn-icon" id="closeFbPageModal" aria-label="Close Facebook page selection"><i data-lucide="x"></i></button>
       </div>
       <div style="padding: 16px 0;">
         <p class="hint" style="margin-bottom: 16px;">Select the Facebook Page you want to connect to this CRM organization.</p>
@@ -579,11 +580,11 @@
   </div>
 
   <!-- ════════════ MODAL: FB FORMS SELECTION ════════════ -->
-  <div class="modal-backdrop" id="fbFormsModal">
+  <div class="modal-backdrop" id="fbFormsModal" role="dialog" aria-modal="true" aria-labelledby="fbFormsTitle">
     <div class="modal-box" style="max-width:500px;">
       <div class="modal-head">
-        <h3>Select Lead Forms</h3>
-        <button class="btn-icon" id="closeFbFormsModal"><i data-lucide="x"></i></button>
+        <h3 id="fbFormsTitle">Select Lead Forms</h3>
+        <button class="btn-icon" id="closeFbFormsModal" aria-label="Close Facebook forms selection"><i data-lucide="x"></i></button>
       </div>
       <div style="padding: 16px 0;">
         <p class="hint" style="margin-bottom: 16px;">Select which Lead Forms should automatically create leads in the CRM.</p>
@@ -599,11 +600,11 @@
   </div>
 
   <!-- ════════════ MODAL: MANAGE FB CONNECTION ════════════ -->
-  <div class="modal-backdrop" id="manageMetaModal">
+  <div class="modal-backdrop" id="manageMetaModal" role="dialog" aria-modal="true" aria-labelledby="manageMetaTitle">
     <div class="modal-box" style="max-width:500px;">
       <div class="modal-head">
-        <h3>Manage Connection</h3>
-        <button class="btn-icon" id="closeManageMetaModal"><i data-lucide="x"></i></button>
+        <h3 id="manageMetaTitle">Manage Connection</h3>
+        <button class="btn-icon" id="closeManageMetaModal" aria-label="Close connection manager"><i data-lucide="x"></i></button>
       </div>
       <div style="padding: 16px 0;">
         <div class="detail-section">
@@ -633,11 +634,11 @@
   </div>
 
   <!-- ════════════ MODAL: AUTH ════════════ -->
-  <div class="modal-backdrop" id="authModal">
+  <div class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
     <div class="modal-box" style="max-width:420px;">
       <div class="modal-head">
         <h3 id="authModalTitle">Sign In</h3>
-        <button class="btn-icon" id="closeAuthModalBtn"><i data-lucide="x"></i></button>
+        <button class="btn-icon" id="closeAuthModalBtn" aria-label="Close sign in modal"><i data-lucide="x"></i></button>
       </div>
 
       <div class="auth-tabs">
@@ -648,11 +649,11 @@
       <form id="loginForm">
         <div class="form-group">
           <label>Email</label>
-          <input type="email" class="form-control" id="loginEmail" value="admin@acme.com" required>
+          <input type="email" class="form-control" id="loginEmail" required>
         </div>
         <div class="form-group">
           <label>Password</label>
-          <input type="password" class="form-control" id="loginPassword" value="password123" required>
+          <input type="password" class="form-control" id="loginPassword" required>
         </div>
         <div class="demo-hint">
           <strong>Demo accounts:</strong><br>
@@ -681,7 +682,7 @@
         </div>
         <div class="form-group">
           <label>Password <span class="req">*</span></label>
-          <input type="password" class="form-control" id="regPassword" placeholder="Minimum 6 characters" required>
+          <input type="password" class="form-control" id="regPassword" placeholder="Minimum 6 characters" required minlength="6">
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;">
           <i data-lucide="building"></i> Create Account
@@ -691,11 +692,11 @@
   </div>
 
   <!-- ════════════ MODAL: SIMULATE LEAD (quick) ════════════ -->
-  <div class="modal-backdrop" id="simulateModal">
+  <div class="modal-backdrop" id="simulateModal" role="dialog" aria-modal="true" aria-labelledby="simulateTitle">
     <div class="modal-box" style="max-width:460px;">
       <div class="modal-head">
-        <h3>Simulate Meta Lead</h3>
-        <button class="btn-icon" id="closeSimulateModal"><i data-lucide="x"></i></button>
+        <h3 id="simulateTitle">Simulate Meta Lead</h3>
+        <button class="btn-icon" id="closeSimulateModal" aria-label="Close simulate modal"><i data-lucide="x"></i></button>
       </div>
       <form id="quickSimulateForm">
         <div class="form-row">

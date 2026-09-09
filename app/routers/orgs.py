@@ -67,6 +67,9 @@ def update_org_settings(
 
 
 @router.get("/list", response_model=List[OrgSettingsOut])
-def list_organizations(db: Session = Depends(get_db)):
-    """Public helper for tenant switcher demo."""
-    return db.query(Organization).all()
+def list_organizations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Returns organizations visible to the authenticated user."""
+    return db.query(Organization).filter(Organization.id == current_user.org_id).all()

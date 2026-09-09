@@ -54,6 +54,7 @@ class User(Base):
     organization = relationship("Organization", back_populates="users")
     assigned_campaigns = relationship("Campaign", back_populates="assigned_user", foreign_keys="Campaign.assigned_user_id")
     meta_page_connections = relationship("MetaPageConnection", back_populates="user", cascade="all, delete-orphan")
+    google_sheet_connections = relationship("GoogleSheetConnection", back_populates="user", cascade="all, delete-orphan")
 
 
 class MetaPageConnection(Base):
@@ -87,7 +88,7 @@ class GoogleSheetConnection(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     organization = relationship("Organization", back_populates="google_sheets")
-    user = relationship("User")
+    user = relationship("User", back_populates="google_sheet_connections")
     campaign = relationship("Campaign", back_populates="google_sheets")
 
 
@@ -115,7 +116,7 @@ class Lead(Base):
     __tablename__ = "leads"
 
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True, default=1)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=True, index=True)  # NEW
     fb_lead_id = Column(String(255), index=True, nullable=False)
     name = Column(String(255))

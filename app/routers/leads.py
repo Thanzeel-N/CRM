@@ -1,7 +1,8 @@
 import io
 import time
+import logging
 import random
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, List
 
 import pandas as pd
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+import dateutil.parser
 
 from app.database import get_db
 from app.models import Lead, LeadStatus, LeadStatusHistory, WhatsAppMessage, User, Campaign, UserRole
@@ -18,6 +20,8 @@ from app.schemas import (
 )
 from app.services.whatsapp import send_whatsapp_message
 from app.services.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -106,7 +110,7 @@ async def list_lead_forms(
                     if fname:
                         form_map[fid] = fname
                 except Exception:
-                    pass
+                    logger.debug("Graph API form name resolution failed for form %s", fid)
 
     # 2. Backfill existing leads where form_name is raw numeric form ID
     if form_map:
@@ -123,7 +127,6 @@ async def list_lead_forms(
 
     # 2.5 Backfill created_at from raw_data if available
     try:
-        import dateutil.parser
         leads_to_fix = db.query(Lead).filter(
             Lead.org_id == current_user.org_id,
             Lead.raw_data != None
@@ -137,11 +140,11 @@ async def list_lead_forms(
                         l.created_at = parsed_dt
                         date_updated = True
                 except Exception:
-                    pass
+                    logger.debug("Failed to parse created_time for lead %s", l.id)
         if date_updated:
             db.commit()
     except Exception:
-        pass
+        logger.debug("dateutil.parser not available, skipping date backfill")
     # 3. Query distinct form names
     forms_db = db.query(Lead.form_name).filter(
         Lead.org_id == current_user.org_id,
@@ -183,8 +186,6 @@ def list_lead_campaigns(
             seen.add(val)
             result.append({"id": val, "name": val})
             
-    # Also add manually created campaigns
-    from app.models import Campaign
     manual_campaigns = db.query(Campaign).filter(
         Campaign.org_id == current_user.org_id,
         Campaign.is_active == True
@@ -333,7 +334,7 @@ def simulate_meta_lead(
 ):
     fb_id = f"meta_sim_{int(time.time()*1000)}_{random.randint(1000, 9999)}"
     mock_raw_data = {
-        "created_time": datetime.utcnow().isoformat(),
+        "created_time": datetime.now(timezone.utc).isoformat(),
         "id": fb_id,
         "ad_id": f"ad_{random.randint(10000, 99999)}",
         "form_id": payload.form_name,
@@ -482,7 +483,7 @@ async def whatsapp_send(
         result = await send_whatsapp_message(lead.phone, payload.message)
         wa_msg_id = result.get("messages", [{}])[0].get("id") if isinstance(result, dict) else f"wa_sim_{int(time.time())}"
     except Exception:
-        result = {"status": "simulated"}
+        logger.debug("WhatsApp send failed for lead %s, using simulated response", payload.lead_id)
         wa_msg_id = f"wa_sim_{int(time.time())}"
 
     msg_record = WhatsAppMessage(

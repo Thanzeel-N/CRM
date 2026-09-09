@@ -1,7 +1,11 @@
 from typing import Optional
+import logging
+
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 GRAPH_API_BASE = "https://graph.facebook.com/v20.0"
 
@@ -21,6 +25,7 @@ async def fetch_lead_details(leadgen_id: str, access_token: Optional[str] = None
             response.raise_for_status()
             return response.json()
         except Exception:
+            logger.debug("Graph API fetch failed for leadgen_id=%s, using mock data", leadgen_id)
             # Fallback mock payload for local dev/testing
             return {
                 "id": leadgen_id,
