@@ -24,11 +24,15 @@ FB_API_BASE = "https://graph.facebook.com/v20.0"
 
 
 async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncClient = None) -> dict:
-    """Best-effort refresh of Campaign.is_active against Meta's live campaign/form status.
+    """Refresh Campaign.is_active and meta_status from Meta's live form status.
 
-    Uses the org's stored page tokens. If the token has ads permission it reads the ad
-    campaign's effective_status; otherwise it falls back to the connected form's status.
-    Statuses we cannot verify are left unchanged.
+    Page tokens do NOT have ``ads_read`` permission so we cannot query the
+    Campaign API directly.  Instead we:
+      1. Fetch every ``leadgen_form`` on the connected page.
+      2. For each form that has leads, read one sample lead to learn which
+         Meta campaign (by name & ID) it belongs to.
+      3. Aggregate form statuses per campaign: if ANY form is ACTIVE the
+         campaign is ACTIVE; otherwise use the first form's status.
     """
     from app.models import Campaign
     conns = db.query(MetaPageConnection).filter(
@@ -38,45 +42,107 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
     if not conns:
         return {"checked": 0, "updated": 0}
 
-    form_status = {}
-    for conn in conns:
-        for f in (conn.connected_forms or []):
-            if isinstance(f, dict) and f.get("id"):
-                form_status[str(f["id"])] = (f.get("status") or "").upper()
-
-    campaigns = db.query(Campaign).filter(Campaign.org_id == org_id).all()
+    _owned_client = client or httpx.AsyncClient(timeout=30)
     checked = 0
     updated = 0
 
-    _owned_client = client or httpx.AsyncClient()
     try:
-        for camp in campaigns:
-            new_active = None
+        # {campaign_name: {"meta_campaign_id": str, "form_statuses": [str]}}
+        campaign_info = {}
 
-            # 1. Live ad-campaign status (requires ads permission; best effort)
-            if camp.meta_campaign_id:
-                token = conns[0].access_token
+        for conn in conns:
+            token = conn.access_token
+            page_id = conn.page_id
+
+            # Step 1: fetch ALL leadgen forms from this page
+            url = f"{FB_API_BASE}/{page_id}/leadgen_forms"
+            params = {"access_token": token, "fields": "id,name,status", "limit": 100}
+            all_forms = []
+            while url:
                 try:
-                    url = f"{FB_API_BASE}/{camp.meta_campaign_id}"
-                    resp = await _owned_client.get(url, params={"access_token": token, "fields": "status,effective_status"})
+                    resp = await _owned_client.get(url, params=params)
                     data = resp.json()
-                    eff = (data.get("effective_status") or data.get("status") or "").upper()
-                    if eff:
-                        new_active = (eff == "ACTIVE")
-                        checked += 1
+                    if "error" in data:
+                        logger.warning("leadgen_forms error for page %s: %s",
+                                       page_id, data["error"].get("message"))
+                        break
+                    all_forms.extend(data.get("data", []))
+                    url = data.get("paging", {}).get("next")
+                    params = None
+                except Exception as exc:
+                    logger.warning("leadgen_forms fetch failed for page %s: %s", page_id, exc)
+                    break
+
+            # Update stored connected_forms with fresh status info
+            if all_forms:
+                updated_forms = [
+                    {"id": str(f["id"]),
+                     "name": f.get("name") or f"Form #{f['id']}",
+                     "status": f.get("status")}
+                    for f in all_forms
+                ]
+                if conn.connected_forms != updated_forms:
+                    conn.connected_forms = updated_forms
+
+            # Step 2: for each form, fetch one sample lead to map form -> campaign
+            for form in all_forms:
+                form_id = str(form.get("id"))
+                form_status = (form.get("status") or "").upper()
+
+                lead_url = f"{FB_API_BASE}/{form_id}/leads"
+                lead_params = {
+                    "access_token": token,
+                    "fields": "id,campaign_id,campaign_name",
+                    "limit": 1,
+                }
+                try:
+                    resp = await _owned_client.get(lead_url, params=lead_params)
+                    lead_data = resp.json()
+                    if "error" in lead_data:
+                        continue
+                    leads = lead_data.get("data", [])
+                    if not leads:
+                        continue
+                    lead = leads[0]
+                    camp_name = lead.get("campaign_name") or ""
+                    camp_id = str(lead.get("campaign_id") or "")
+                    if not camp_name:
+                        continue
+
+                    if camp_name not in campaign_info:
+                        campaign_info[camp_name] = {"meta_campaign_id": camp_id, "form_statuses": []}
+                    campaign_info[camp_name]["form_statuses"].append(form_status)
+                    if camp_id and not campaign_info[camp_name]["meta_campaign_id"]:
+                        campaign_info[camp_name]["meta_campaign_id"] = camp_id
                 except Exception:
-                    pass
+                    continue
 
-            # 2. Fallback: connected Meta lead form status
-            if new_active is None and camp.meta_form_id:
-                st = form_status.get(str(camp.meta_form_id))
-                if st:
-                    new_active = (st == "ACTIVE")
-                    checked += 1
+        # Step 3: apply to local Campaign rows
+        campaigns = db.query(Campaign).filter(Campaign.org_id == org_id).all()
+        for camp in campaigns:
+            info = campaign_info.get(camp.name)
+            if not info:
+                continue
 
+            checked += 1
+            statuses = info["form_statuses"]
+            has_active = "ACTIVE" in statuses
+            overall = "ACTIVE" if has_active else (statuses[0] if statuses else None)
+
+            changed = False
+            if info["meta_campaign_id"] and not camp.meta_campaign_id:
+                camp.meta_campaign_id = info["meta_campaign_id"]
+                changed = True
+            if overall and camp.meta_status != overall:
+                camp.meta_status = overall
+                changed = True
+            new_active = (overall == "ACTIVE") if overall else None
             if new_active is not None and camp.is_active != new_active:
                 camp.is_active = new_active
+                changed = True
+            if changed:
                 updated += 1
+
     finally:
         if client is None:
             await _owned_client.aclose()

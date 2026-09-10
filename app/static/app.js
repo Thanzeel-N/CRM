@@ -26,7 +26,7 @@ const state = {
   activeLead: null,
   statusChart: null,
   campaignChart: null,
-  showArchivedCampaigns: false,
+  hideInactiveCampaigns: false,
   // Pagination
   currentPage: 0,
   pageSize: 100,
@@ -727,6 +727,31 @@ document.getElementById('simulatorForm').addEventListener('submit', async e => {
 });
 
 // ─── Campaigns ───────────────────────────────────────────────────
+
+// Map Meta effective_status to a human-readable label and CSS class
+function metaStatusInfo(campaign) {
+  const raw = (campaign.meta_status || '').toUpperCase();
+  const map = {
+    'ACTIVE':               { label: 'Active',      css: 'active' },
+    'PAUSED':               { label: 'Paused',      css: 'paused' },
+    'DELETED':              { label: 'Deleted',     css: 'deleted' },
+    'ARCHIVED':             { label: 'Archived',    css: 'archived' },
+    'IN_PROCESS':           { label: 'In Process',  css: 'in_process' },
+    'WITH_ISSUES':          { label: 'With Issues', css: 'paused' },
+    'CAMPAIGN_PAUSED':      { label: 'Campaign Paused', css: 'paused' },
+    'ADSET_PAUSED':         { label: 'Adset Paused',    css: 'paused' },
+    'DISAPPROVED':          { label: 'Disapproved',     css: 'deleted' },
+    'PENDING_REVIEW':       { label: 'Pending Review',  css: 'in_process' },
+    'PENDING_BILLING_INFO': { label: 'Pending Billing', css: 'in_process' },
+  };
+  if (raw && map[raw]) return map[raw];
+  if (raw) return { label: raw.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), css: 'unknown' };
+  // Fallback to is_active boolean when meta_status not yet synced
+  return campaign.is_active
+    ? { label: 'Active (local)', css: 'active' }
+    : { label: 'Inactive (local)', css: 'inactive' };
+}
+
 async function loadCampaigns() {
   if (!state.token) return;
   try {
@@ -739,7 +764,7 @@ async function loadCampaigns() {
 
 function updateCampaignMetrics() {
   const total   = state.campaigns.length;
-  const active  = state.campaigns.filter(c => c.is_active).length;
+  const active  = state.campaigns.filter(c => (c.meta_status || '').toUpperCase() === 'ACTIVE' || (!c.meta_status && c.is_active)).length;
   const leads   = state.campaigns.reduce((sum, c) => sum + (Number(c.lead_count) || 0), 0);
   const sheets  = state.campaigns.reduce((sum, c) => sum + (c.google_sheets || []).length, 0);
 
@@ -750,12 +775,12 @@ function updateCampaignMetrics() {
 }
 
 window.toggleShowArchivedCampaigns = function() {
-  state.showArchivedCampaigns = !state.showArchivedCampaigns;
+  state.hideInactiveCampaigns = !state.hideInactiveCampaigns;
   const btn = document.getElementById('showArchivedCampaignsBtn');
   if (btn) {
-    btn.innerHTML = state.showArchivedCampaigns
-      ? '<i data-lucide="archive"></i> Hide archived'
-      : '<i data-lucide="archive"></i> Show archived';
+    btn.innerHTML = state.hideInactiveCampaigns
+      ? '<i data-lucide="eye"></i> Show all'
+      : '<i data-lucide="eye-off"></i> Hide inactive';
     lucide.createIcons();
   }
   renderCampaignsGrid();
@@ -779,18 +804,25 @@ window.refreshCampaignStatuses = async function() {
 function renderCampaignsGrid() {
   const grid = document.getElementById('campaignsGrid');
   if (!grid) return;
-  const visible = state.showArchivedCampaigns
-    ? state.campaigns
-    : state.campaigns.filter(c => c.is_active);
+
+  // Default: show all campaigns. When toggle is on, hide inactive ones.
+  const visible = state.hideInactiveCampaigns
+    ? state.campaigns.filter(c => {
+        const st = (c.meta_status || '').toUpperCase();
+        return st === 'ACTIVE' || (!st && c.is_active);
+      })
+    : state.campaigns;
+
   if (!visible.length) {
     grid.innerHTML = `<div class="empty-state">
       <i data-lucide="megaphone"></i>
-      <p>${state.showArchivedCampaigns ? 'No campaigns yet.<br>Create one to start assigning staff to leads.' : 'No active campaigns right now.<br>Use "Refresh from Meta" to sync status, or click "Show archived".'}</p>
+      <p>${state.hideInactiveCampaigns ? 'No active campaigns right now.<br>Click "Show all" to see all campaigns, or use "Refresh from Meta" to sync status.' : 'No campaigns yet.<br>Create one or connect a Meta page to auto-discover campaigns.'}</p>
     </div>`;
     lucide.createIcons();
     return;
   }
   grid.innerHTML = visible.map(c => {
+    const status = metaStatusInfo(c);
     const sheetsList = (c.google_sheets || []).map(s => `
       <div class="campaign-sheet-item">
         <div class="campaign-sheet-name">
@@ -805,10 +837,11 @@ function renderCampaignsGrid() {
     <div class="campaign-card">
       <div class="campaign-card-header">
         <h4>${esc(c.name)}</h4>
-        <span class="campaign-status-badge ${c.is_active ? 'active' : 'inactive'}">${c.is_active ? 'Active' : 'Archived'}</span>
+        <span class="campaign-status-badge ${status.css}">${status.label}</span>
       </div>
       ${c.description ? `<div class="campaign-card-description">${esc(c.description)}</div>` : ''}
       <div class="campaign-card-meta">
+        ${c.meta_campaign_id ? `<div class="campaign-meta-row"><i data-lucide="target"></i><span>Campaign ID:</span><code>${esc(c.meta_campaign_id)}</code></div>` : ''}
         ${c.meta_form_id ? `<div class="campaign-meta-row"><i data-lucide="form-input"></i><span>Form ID:</span><code>${esc(c.meta_form_id)}</code></div>` : ''}
         ${c.meta_ad_account_id ? `<div class="campaign-meta-row"><i data-lucide="building-2"></i><span>Ad Account:</span><code>${esc(c.meta_ad_account_id)}</code></div>` : ''}
       </div>

@@ -46,9 +46,11 @@ class CampaignOut(BaseModel):
     description: Optional[str] = None
     meta_form_id: Optional[str] = None
     meta_ad_account_id: Optional[str] = None
+    meta_campaign_id: Optional[str] = None
     assigned_user_id: Optional[int] = None
     assigned_user_name: Optional[str] = None
     is_active: bool
+    meta_status: Optional[str] = None
     lead_count: int = 0
     google_sheets: List[SheetConnectionOut] = []
 
@@ -88,9 +90,11 @@ def _campaign_out(c: Campaign, db: Session) -> CampaignOut:
         description=c.description,
         meta_form_id=c.meta_form_id,
         meta_ad_account_id=c.meta_ad_account_id,
+        meta_campaign_id=c.meta_campaign_id,
         assigned_user_id=c.assigned_user_id,
         assigned_user_name=c.assigned_user.name if c.assigned_user else None,
         is_active=c.is_active,
+        meta_status=c.meta_status,
         lead_count=count,
         google_sheets=sheets
     )

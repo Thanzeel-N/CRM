@@ -751,8 +751,18 @@ strong { font-weight:600; }
 }
 .campaign-status-badge.active { background: var(--green-bg); color: var(--green); }
 .campaign-status-badge.active::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
-.campaign-status-badge.inactive { background: var(--glass); color: var(--text-3); }
-.campaign-status-badge.inactive::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.campaign-status-badge.paused { background: var(--amber-bg); color: var(--amber); }
+.campaign-status-badge.paused::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+.campaign-status-badge.deleted,
+.campaign-status-badge.archived { background: var(--red-bg); color: var(--red); }
+.campaign-status-badge.deleted::before,
+.campaign-status-badge.archived::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.campaign-status-badge.in_process { background: rgba(99,102,241,0.12); color: #818cf8; }
+.campaign-status-badge.in_process::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #818cf8; }
+.campaign-status-badge.inactive,
+.campaign-status-badge.unknown { background: var(--glass); color: var(--text-3); }
+.campaign-status-badge.inactive::before,
+.campaign-status-badge.unknown::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
 
 .campaign-card-description {
   padding: 0 20px 14px;
