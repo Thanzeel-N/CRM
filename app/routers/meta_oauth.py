@@ -364,28 +364,6 @@ async def connect_page(
                                 
                             fields = parse_field_data(l.get("field_data", []))
                             
-                            phone = fields.get("phone_number")
-                            email = fields.get("email")
-                            campaign_name = l.get("campaign_name")
-                            
-                            from sqlalchemy import or_, and_
-                            duplicate_conds = []
-                            if phone:
-                                duplicate_conds.append(and_(Lead.phone != None, Lead.phone != "", Lead.phone == phone))
-                            if email:
-                                duplicate_conds.append(and_(Lead.email != None, Lead.email != "", Lead.email == email))
-                                
-                            if duplicate_conds:
-                                existing_duplicate = db.query(Lead).filter(
-                                    Lead.org_id == current_user.org_id,
-                                    Lead.campaign_name == campaign_name,
-                                    or_(*duplicate_conds)
-                                ).first()
-                                if existing_duplicate:
-                                    seen_lead_ids.add(fb_lead_id)
-                                    sync_results["duplicates_skipped"] += 1
-                                    continue
-                            
                             created_at_val = None
                             if "created_time" in l:
                                 try:
@@ -407,7 +385,14 @@ async def connect_page(
                                 raw_data=l,
                                 created_at=created_at_val
                             )
-                            db.add(new_lead)
+                            from app.services.lead_ingestion import insert_lead_once
+                            new_lead, inserted = insert_lead_once(db, new_lead)
+                            if not inserted:
+                                seen_lead_ids.add(fb_lead_id)
+                                sync_results["duplicates_skipped"] += 1
+                                continue
+                            from app.routers.webhooks import sync_lead_to_google_sheets
+                            sync_lead_to_google_sheets(db, new_lead, commit=False)
                             seen_lead_ids.add(fb_lead_id)
                             sync_results["leads_imported"] += 1
                             
@@ -643,7 +628,14 @@ async def sync_facebook_leads(
                                 raw_data=l,
                                 created_at=created_at_val
                             )
-                            db.add(new_lead)
+                            from app.services.lead_ingestion import insert_lead_once
+                            new_lead, inserted = insert_lead_once(db, new_lead)
+                            if not inserted:
+                                seen_lead_ids.add(fb_lead_id)
+                                sync_results["duplicates_skipped"] += 1
+                                continue
+                            from app.routers.webhooks import sync_lead_to_google_sheets
+                            sync_lead_to_google_sheets(db, new_lead, commit=False)
                             seen_lead_ids.add(fb_lead_id)
                             sync_results["leads_imported"] += 1
                             

@@ -20,6 +20,10 @@ class LeadOut(BaseModel):
     raw_data: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    follow_up_at: Optional[datetime] = None
+    first_contacted_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -76,4 +80,3 @@ class LeadStats(BaseModel):
     conversion_rate: float
     new_today: int
     campaign_counts: Dict[str, int]
-

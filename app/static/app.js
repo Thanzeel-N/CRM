@@ -82,8 +82,12 @@ function saveAuth(data) {
 }
 
 function doLogout() {
+  resetWorkflow();
   state.token = null;
   state.user  = null;
+  state.leads = []; state.campaigns = []; state.staff = [];
+  closeDrawer();
+  renderKanban([]); renderTable([], 0);
   localStorage.removeItem('crm_token');
   localStorage.removeItem('crm_user');
   updateUserUI();
@@ -111,7 +115,8 @@ document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
   item.addEventListener('click', () => {
     const tab = item.dataset.tab;
     // Require login only for admin-only management tabs
-    const adminTabs = ['tab-campaigns', 'tab-staff', 'tab-connect'];
+    const adminTabs = ['tab-campaigns', 'tab-staff', 'tab-connect', 'tab-simulator'];
+    if (adminTabs.includes(tab) && state.user?.role !== 'admin') { toast('Admin access required', 'error'); return; }
     if (!state.user && adminTabs.includes(tab)) { openModal('authModal'); return; }
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -119,7 +124,9 @@ document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
     document.getElementById(tab)?.classList.add('active');
     document.getElementById('pageTitleText').textContent = item.querySelector('span')?.textContent || '';
 
-    if (tab === 'tab-analytics') renderCharts();
+    if (tab === 'tab-analytics') { renderCharts(); loadWorkflow(); }
+    if (tab === 'tab-today') loadWorkflow();
+    if (tab === 'tab-connect') loadIntegrationJobs();
     if (tab === 'tab-campaigns') loadCampaigns();
     if (tab === 'tab-staff')     loadStaff();
     if (tab === 'tab-connect')   loadIntegrations();
@@ -486,7 +493,7 @@ function renderTable(leads, total) {
       const dateStr = isValidDt ? dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
       const timeStr = isValidDt ? dt.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12: true }) : '';
       const campaign = state.campaigns.find(c => c.id === l.campaign_id);
-      const assignee = campaign?.assigned_user_name || '—';
+      const assignee = l.owner_name || campaign?.assigned_user_name || '—';
       const formName = l.form_name || '—';
       const statusText = String(l.status || 'new');
       const statusClass = statusText.replace(/ /g, '-');
@@ -580,6 +587,7 @@ function openLeadDrawerById(id) {
 
 function openLeadDrawer(lead) {
   state.activeLead = lead;
+  loadLeadWorkflow(lead);
   document.getElementById('drawerLeadName').textContent    = lead.name || '—';
   document.getElementById('drawerLeadTime').textContent    = lead.created_at ? new Date(lead.created_at).toLocaleString() : '';
   document.getElementById('drawerLeadEmail').textContent   = lead.email || '—';
@@ -648,6 +656,7 @@ document.getElementById('drawerStatusSelect').addEventListener('change', async f
     renderKanban(state.leads);
     renderTable(state.leads, state.totalLeads);
     toast('Status updated');
+    loadLeadWorkflow(updated); loadWorkflow();
   } catch (err) { toast(err.message, 'error'); }
 });
 
@@ -661,6 +670,7 @@ document.getElementById('saveNotesBtn').addEventListener('click', async () => {
       body: JSON.stringify({ status: state.activeLead.status, notes }),
     });
     toast('Notes saved');
+    loadLeadActivities(state.activeLead.id);
   } catch (err) { toast(err.message, 'error'); }
 });
 
@@ -764,7 +774,7 @@ function renderCampaignsGrid() {
     <div class="campaign-card">
       <div class="campaign-card-header">
         <h4>${esc(c.name)}</h4>
-        <span class="campaign-status-badge ${c.is_active ? 'active' : 'inactive'}">${c.is_active ? 'Active' : 'Inactive'}</span>
+        <span class="campaign-status-badge ${c.is_active ? 'active' : 'inactive'}">${c.is_active ? 'Active' : 'Archived'}</span>
       </div>
       ${c.description ? `<div class="campaign-card-description">${esc(c.description)}</div>` : ''}
       <div class="campaign-card-meta">
@@ -788,6 +798,7 @@ function renderCampaignsGrid() {
           </span>
         </div>
         <div class="campaign-actions">
+          <button class="btn btn-ghost" onclick="toggleCampaignArchive(${c.id}, ${c.is_active})">${c.is_active ? 'Archive' : 'Restore'}</button>
           <button class="btn-icon-sm sheet" onclick="openCampaignSheetModal(${c.id})" title="Connect Google Sheet">
             <i data-lucide="file-spreadsheet"></i>
           </button>
@@ -1230,7 +1241,7 @@ async function loadAll() {
       document.getElementById(id)?.classList.remove('active');
     });
     document.getElementById('chipAll')?.classList.add('active');
-    await Promise.all([loadCampaigns(), loadLeads(), loadIntegrations()]);
+    await Promise.all([loadCampaigns(), loadLeads(), loadIntegrations(), loadWorkflow()]);
   }
 }
 
@@ -1502,20 +1513,39 @@ document.addEventListener('DOMContentLoaded', () => {
   const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 
   if (sidebarToggleBtn && sidebar && sidebarBackdrop) {
-    function toggleSidebar() {
-      sidebar.classList.toggle('open');
-      sidebarBackdrop.classList.toggle('active');
+    function setSidebarOpen(open) {
+      sidebar.classList.toggle('open', open);
+      sidebarBackdrop.classList.toggle('active', open);
+      sidebarToggleBtn.setAttribute('aria-expanded', String(open));
+      sidebarToggleBtn.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+      sidebar.inert = window.innerWidth <= 900 && !open;
+      if (open) sidebar.querySelector('.nav-item')?.focus();
     }
+    function toggleSidebar() {
+      setSidebarOpen(!sidebar.classList.contains('open'));
+    }
+    sidebar.querySelectorAll('.nav-item').forEach(item => {
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      item.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); item.click(); }
+      });
+    });
+    setSidebarOpen(false);
     sidebarToggleBtn.addEventListener('click', toggleSidebar);
-    sidebarBackdrop.addEventListener('click', toggleSidebar);
+    sidebarBackdrop.addEventListener('click', () => { setSidebarOpen(false); sidebarToggleBtn.focus(); });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && sidebar.classList.contains('open')) { setSidebarOpen(false); sidebarToggleBtn.focus(); }
+    });
+    window.matchMedia('(max-width: 900px)').addEventListener('change', () => setSidebarOpen(false));
     
     // Close sidebar when clicking a nav item on mobile
     const navItems = sidebar.querySelectorAll('.nav-item');
     navItems.forEach(item => {
       item.addEventListener('click', () => {
         if (window.innerWidth <= 900) {
-          sidebar.classList.remove('open');
-          sidebarBackdrop.classList.remove('active');
+          setSidebarOpen(false);
+          sidebarToggleBtn.focus();
         }
       });
     });

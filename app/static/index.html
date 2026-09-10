@@ -2,7 +2,7 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>MetaCRM — Lead Management Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,7 +30,8 @@
     <nav class="sidebar-nav">
       <p class="nav-section-label">Workspace</p>
       <ul class="nav-list">
-        <li class="nav-item active" data-tab="tab-pipeline">
+        <li class="nav-item active" data-tab="tab-today"><i data-lucide="calendar-check"></i><span>Today</span></li>
+        <li class="nav-item" data-tab="tab-pipeline">
           <i data-lucide="kanban"></i><span>Pipeline Board</span>
         </li>
         <li class="nav-item" data-tab="tab-table">
@@ -54,9 +55,9 @@
         </li>
       </ul>
 
-      <p class="nav-section-label">Tools</p>
+      <p class="nav-section-label admin-only">Admin tools</p>
       <ul class="nav-list">
-        <li class="nav-item" data-tab="tab-simulator">
+        <li class="nav-item admin-only" data-tab="tab-simulator">
           <i data-lucide="zap"></i><span>Webhook Tester</span>
         </li>
       </ul>
@@ -87,11 +88,11 @@
     <!-- TOP HEADER -->
     <header class="top-header">
       <div class="header-left">
-        <button class="btn-icon" id="sidebarToggleBtn" aria-label="Toggle sidebar" style="display:none;">
+        <button class="btn-icon" id="sidebarToggleBtn" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false" style="display:none;">
           <i data-lucide="menu"></i>
         </button>
         <div class="page-title">
-          <h1 id="pageTitleText">Pipeline Board</h1>
+          <h1 id="pageTitleText">Today</h1>
           <span class="org-pill" id="headerOrgName">—</span>
         </div>
       </div>
@@ -99,21 +100,21 @@
       <div class="header-center">
         <div class="search-wrap">
           <i data-lucide="search"></i>
-          <input type="text" id="searchInput" placeholder="Search leads…">
+          <input type="text" id="searchInput" placeholder="Search leads…" aria-label="Search leads">
         </div>
-        <select class="hdr-select" id="campaignFilterSelect">
+        <select class="hdr-select" id="campaignFilterSelect" aria-label="Filter by campaign">
           <option value="">All Campaigns</option>
         </select>
-        <select class="hdr-select" id="formFilterSelect">
+        <select class="hdr-select" id="formFilterSelect" aria-label="Filter by lead form">
           <option value="">All Forms</option>
         </select>
       </div>
 
       <div class="header-right">
-        <button class="btn btn-ghost" id="syncMetaBtn" title="Sync leads directly from Meta Ads">
+        <button class="btn btn-ghost" id="syncMetaBtn" title="Sync leads directly from Meta Ads" aria-label="Sync Meta leads">
           <i data-lucide="refresh-cw"></i><span>Sync Meta</span>
         </button>
-        <button class="btn btn-ghost" id="exportBtn" title="Export to Excel">
+        <button class="btn btn-ghost" id="exportBtn" title="Export to Excel" aria-label="Export to Excel">
           <i data-lucide="download"></i><span>Export</span>
         </button>
         <button class="btn btn-ghost" id="logoutBtn" title="Sign out" aria-label="Sign out">
@@ -161,7 +162,13 @@
       </div>
 
       <!-- ── TAB: PIPELINE BOARD ── -->
-      <div id="tab-pipeline" class="tab-pane active">
+      <div id="tab-today" class="tab-pane active">
+        <div class="section-head"><div><h2>Today’s follow-ups</h2><p class="hint">Due today and overdue. Times use your device’s timezone.</p></div><button class="btn btn-secondary" onclick="loadWorkflow()">Refresh</button></div>
+        <div id="workflowSummary" class="workflow-summary"></div>
+        <div id="followUpList" class="follow-up-list"><p class="hint">Sign in to see your follow-ups.</p></div>
+        <div id="followUpPages" class="pagination-bar"></div>
+      </div>
+      <div id="tab-pipeline" class="tab-pane">
         <div class="section-head">
           <h2>Lead Pipeline</h2>
           <span class="hint">Click a card to manage lead details</span>
@@ -233,6 +240,7 @@
 
       <!-- ── TAB: ANALYTICS ── -->
       <div id="tab-analytics" class="tab-pane">
+        <div class="workflow-panel"><h3>Team and campaign performance</h3><p class="hint">All-time results for leads you can access. Response time starts at lead creation and ends at the first logged call or status change.</p><div id="workflowAnalytics"></div></div>
         <div class="section-head analytics-section-head">
           <h2>Analytics</h2>
           <div class="date-filter-group">
@@ -322,6 +330,7 @@
 
       <!-- ── TAB: LEAD SOURCES ── -->
       <div id="tab-connect" class="tab-pane">
+        <div class="workflow-panel"><div class="section-head"><h3>Sync activity</h3><button class="btn btn-ghost" onclick="loadIntegrationJobs()">Refresh</button></div><p class="hint">Failed deliveries retry automatically up to five times.</p><div id="integrationJobs"></div></div>
         <div class="section-head">
           <h2>Lead Sources</h2>
         </div>
@@ -453,6 +462,19 @@
         </select>
       </div>
 
+      <div class="detail-section">
+        <p class="detail-label">Next action</p>
+        <label for="leadOwner">Lead owner</label><select id="leadOwner" class="form-control"></select>
+        <label for="followUpAt">Follow-up date and time</label><input id="followUpAt" type="datetime-local" class="form-control">
+        <div class="workflow-actions"><button class="btn btn-primary" id="saveFollowUp">Save next action</button><button class="btn btn-ghost" id="completeFollowUp">Mark done</button><a id="callLead" class="btn btn-secondary">Call</a></div>
+      </div>
+      <div class="detail-section">
+        <p class="detail-label">Activity timeline</p>
+        <label for="activityKind">Activity type</label><select id="activityKind" class="form-control"><option value="call">Call</option><option value="note">Note</option></select>
+        <label for="activityDetail">Details</label><textarea id="activityDetail" class="form-control" rows="2" maxlength="4000" placeholder="Record the outcome and next steps"></textarea>
+        <button id="addActivity" class="btn btn-ghost">Log activity</button>
+        <div id="leadActivities" class="activity-timeline" aria-live="polite"></div>
+      </div>
       <!-- WhatsApp section disabled until integration is configured
       <div class="detail-section">
         <p class="detail-label" style="display:flex;align-items:center;gap:6px;"><i data-lucide="message-circle" style="width:14px;color:#25d366;"></i> WhatsApp</p>
@@ -726,5 +748,6 @@
 
   <!-- ════════════ MODAL: SIMULATE LEAD (quick) ════════════ -->
   <script src="/static/app.js"></script>
+  <script src="/static/workflow.js"></script>
 </body>
 </html>

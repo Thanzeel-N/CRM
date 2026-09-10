@@ -89,7 +89,23 @@ async def connect_google_sheet(
         
     db.commit()
     db.refresh(conn)
-    return {"status": "success", "message": "Google Sheet connected successfully", "id": conn.id}
+
+    # Backfill existing leads that match this connection's campaign
+    from app.models import Lead
+    from app.routers.webhooks import sync_lead_to_google_sheets
+
+    query = db.query(Lead).filter(Lead.org_id == current_user.org_id)
+    if payload.campaign_id:
+        query = query.filter(Lead.campaign_id == payload.campaign_id)
+    existing_leads = query.order_by(Lead.id).all()
+
+    backfilled = 0
+    for lead in existing_leads:
+        sync_lead_to_google_sheets(db, lead, commit=False)
+        backfilled += 1
+    db.commit()
+
+    return {"status": "success", "message": "Google Sheet connected successfully", "id": conn.id, "backfilled_leads": backfilled}
 
 @router.get("/connections", response_model=List[GoogleSheetConnectionOut])
 async def list_google_sheet_connections(

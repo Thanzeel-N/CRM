@@ -42,11 +42,9 @@ def _base_lead_query(db: Session, current_user: User):
                 Campaign.org_id == current_user.org_id
             ).all()
         ]
-        if not assigned_campaign_ids:
-            # Agent has no assigned campaigns — return empty
-            q = q.filter(Lead.id == -1)
-        else:
-            q = q.filter(Lead.campaign_id.in_(assigned_campaign_ids))
+        q = q.filter((Lead.owner_id == current_user.id) | (
+            Lead.owner_id.is_(None) & Lead.campaign_id.in_(assigned_campaign_ids)
+        ))
 
     return q
 
@@ -57,6 +55,9 @@ async def list_lead_forms(
     db: Session = Depends(get_db)
 ):
     """Return a list of unique form details/names associated with this org's leads and connections."""
+    if current_user.role == UserRole.agent:
+        rows = _base_lead_query(db, current_user).with_entities(Lead.form_name).distinct().all()
+        return [{"id": name, "name": name} for (name,) in rows if name]
     from app.models import MetaPageConnection
     import httpx
 
@@ -194,6 +195,9 @@ def list_lead_campaigns(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if current_user.role == UserRole.agent:
+        rows = _base_lead_query(db, current_user).with_entities(Lead.campaign_name).distinct().all()
+        return [{"id": name, "name": name} for (name,) in rows if name]
     campaigns_db = db.query(Lead.campaign_name).filter(
         Lead.org_id == current_user.org_id,
         Lead.campaign_name != None,
@@ -337,6 +341,7 @@ def create_lead(
     lead = Lead(
         org_id=current_user.org_id,
         fb_lead_id=fb_id,
+        owner_id=current_user.id if current_user.role == UserRole.agent else None,
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
@@ -357,6 +362,8 @@ def simulate_meta_lead(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if current_user.role != UserRole.admin:
+        raise HTTPException(403, "Admin access required")
     fb_id = f"meta_sim_{int(time.time()*1000)}_{random.randint(1000, 9999)}"
     mock_raw_data = {
         "created_time": datetime.now(timezone.utc).isoformat(),
@@ -384,6 +391,7 @@ def simulate_meta_lead(
         org_id=current_user.org_id,
         fb_lead_id=fb_id,
         campaign_id=campaign_id,
+        owner_id=current_user.id if current_user.role == UserRole.agent else None,
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
@@ -452,6 +460,13 @@ def update_lead_status(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    from app.routers.workflow import activity
+    if lead.status != update.status:
+        activity(db, lead, current_user, 'status', f'{lead.status.value} → {update.status.value}')
+        if update.status != LeadStatus.new and lead.first_contacted_at is None:
+            lead.first_contacted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    if update.notes is not None and update.notes != lead.notes:
+        activity(db, lead, current_user, 'note', update.notes or 'Notes cleared')
     db.add(LeadStatusHistory(
         lead_id=lead.id,
         old_status=lead.status,

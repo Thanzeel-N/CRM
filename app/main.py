@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
 from app.config import settings
-from app.routers import leads, webhooks, auth, orgs, campaigns, staff, meta_oauth, google_sheets
+from app.routers import workflow, leads, webhooks, auth, orgs, campaigns, staff, meta_oauth, google_sheets
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -27,7 +27,24 @@ settings.validate_production()
 # ── App factory ────────────────────────────────────────────────────────────────
 is_production = settings.app_env == "production"
 
+from contextlib import asynccontextmanager
+import asyncio
+
+@asynccontextmanager
+async def lifespan(app):
+    from app.services.integration_queue import worker
+    task = asyncio.create_task(worker())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Meta Lead Ads CRM",
     description="Multi-tenant CRM for Meta Lead Ads with WhatsApp follow-up and Google Sheets sync.",
     version="1.0.0",
@@ -47,16 +64,14 @@ app.add_middleware(
 )
 
 # ── Database ───────────────────────────────────────────────────────────────────
-Base.metadata.create_all(bind=engine)
+if not is_production:
+    Base.metadata.create_all(bind=engine)
+    from app.schema_upgrade import upgrade_workflow
+    with engine.begin() as connection:
+        upgrade_workflow(connection)
+        from app.services.lead_deduplication import repair_and_enforce_unique_sources
+        repair_and_enforce_unique_sources(connection)
 
-# Auto-migration helper for SQLite dev environments
-try:
-    with engine.connect() as conn:
-        from sqlalchemy import text
-        conn.execute(text("ALTER TABLE google_sheet_connections ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)"))
-        conn.commit()
-except Exception:
-    logger.debug("SQLite auto-migration: campaign_id column already exists or skipped")
 
 # ── Global exception handler ───────────────────────────────────────────────────
 @app.exception_handler(Exception)
@@ -75,6 +90,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(orgs.router)
+app.include_router(workflow.router)
 app.include_router(leads.router)
 app.include_router(campaigns.router)
 app.include_router(staff.router)

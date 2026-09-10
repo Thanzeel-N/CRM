@@ -1,7 +1,7 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Boolean
+    Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Boolean, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -114,6 +114,7 @@ class Campaign(Base):
 
 class Lead(Base):
     __tablename__ = "leads"
+    __table_args__ = (Index('uq_leads_org_source', 'org_id', 'fb_lead_id', unique=True),)
 
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
@@ -127,6 +128,15 @@ class Lead(Base):
     raw_data = Column(JSON)
     status = Column(Enum(LeadStatus), default=LeadStatus.new, nullable=False)
     notes = Column(Text, default="")
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    follow_up_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    first_contacted_at = Column(DateTime(timezone=True), nullable=True)
+    owner = relationship("User", foreign_keys=[owner_id])
+    @property
+    def owner_name(self):
+        return self.owner.name if self.owner else None
+
+    activities = relationship("LeadActivity", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -159,3 +169,38 @@ class WhatsAppMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     lead = relationship("Lead", back_populates="whatsapp_messages")
+
+
+class LeadActivity(Base):
+    __tablename__ = "lead_activities"
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), nullable=False, index=True)
+    actor_name = Column(String(255), nullable=False)
+    kind = Column(String(50), nullable=False)
+    detail = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LeadDuplicateArchive(Base):
+    """Recovery snapshots for exact duplicate rows removed during migration."""
+    __tablename__ = 'lead_duplicate_archive'
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, nullable=False, index=True)
+    original_lead_id = Column(Integer, nullable=False)
+    canonical_lead_id = Column(Integer, nullable=False)
+    snapshot = Column(JSON, nullable=False)
+    archived_at = Column(DateTime, server_default=func.now())
+
+
+class IntegrationJob(Base):
+    __tablename__ = "integration_jobs"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    job_key = Column(String(255), unique=True, nullable=False)
+    kind = Column(String(30), nullable=False)
+    payload = Column(JSON, nullable=False)
+    status = Column(String(30), default="pending", nullable=False, index=True)
+    attempts = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+    next_attempt_at = Column(DateTime, server_default=func.now(), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())

@@ -6,6 +6,12 @@ A multi-tenant CRM for **Meta (Facebook/Instagram) Lead Ads** with WhatsApp foll
 
 ## Features
 
+- **Today workspace** — due and overdue follow-ups, local-time scheduling, completion and call shortcuts. In-app reminders refresh every minute while the tab is visible; no email or push notifications.
+- **Lead ownership and activity** — admins assign individual owners; otherwise campaign assignment applies. Calls, notes, status changes and scheduling actions record the actor and time.
+- **Safe campaign archiving** — archive and restore campaigns without deleting leads or Sheets connections. Archiving is organizational; it does not unsubscribe Meta forms or stop lead capture.
+- **Reliable delivery** — Meta webhook events and Google Sheets deliveries persist in a database queue, retry up to five times with backoff, and expose failures and manual retry in Lead Sources.
+- **Operational analytics** — overdue counts, first recorded response time, and conversion comparisons by campaign and current owner. Existing leads have no response measurement until a new call or status change is recorded.
+
 - **Multi-tenant** — one database, isolated data per organization
 - **Meta Lead Ads webhook** — real-time lead ingestion with HMAC signature validation
 - **WhatsApp Cloud API** — outbound messages + inbound reply logging
@@ -94,6 +100,24 @@ Visit **http://localhost:8000/docs** → Swagger UI (dev only, disabled in produ
 ---
 
 ## Production Deployment
+
+### Repair repeated Meta leads
+
+Every import path now enforces one row per `(org_id, fb_lead_id)` in the database, including concurrent webhook and manual sync requests. Phone numbers and email addresses are not submission identities: different Meta lead IDs remain separate enquiries.
+
+Run `python scripts/audit_leads.py` on the server to compare stored rows with distinct Meta/source IDs. It only reads counts and does not print contact information.
+
+For the duplicate repair, stop the application/worker processes, take a database backup, deploy this version and run `alembic upgrade head`, then start the application. Revision `b422_unique_leads` consolidates rows with the same source ID within each organization and creates the unique index. It retains the oldest record ID, combines notes, moves related history, preserves scheduling/ownership information, and archives every original row in `lead_duplicate_archive` for recovery. Duplicate queued Sheets deliveries are consolidated; existing rows already appended to external Sheets are not removed.
+
+Repeat the audit after migration. For 11 distinct Meta IDs stored three times, the CRM row count changes from 33 to 11. If the audit reports 33 distinct IDs, this repair deliberately does not guess which submissions should be merged.
+
+Before starting the updated application, run `alembic upgrade head` once against the deployment database. Revision `b421_workflow` adds workflow fields, activity history and the integration queue without removing existing leads. Development startup applies the additive schema changes automatically. Production startup requires migrations to have completed.
+
+The application runs the retry worker through its ASGI lifespan. Keep lifespan enabled and at least one application process running. Pending jobs survive restarts; abandoned processing jobs become eligible after their ten-minute lease. The worker polls every ten seconds and retries after increasing delays; admins can retry failed jobs in **Lead Sources → Sync activity**.
+
+Google Sheets rows retain the six existing fields and add a CRM delivery identifier in column G. Reserve that column for these identifiers: retries check it before appending to avoid repeat rows after an uncertain API response. Keep identifiers intact. As with append-based external APIs, simultaneous deliveries to the same worksheet are not an exactly-once guarantee.
+
+Meta lead fetch failures now remain failures rather than generating sample contact data. Unknown or ambiguously connected Facebook pages are ignored. The webhook tester is restricted to admins.
 
 ### Option A — Docker Compose (recommended)
 

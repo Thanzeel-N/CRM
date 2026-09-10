@@ -25,18 +25,8 @@ async def fetch_lead_details(leadgen_id: str, access_token: Optional[str] = None
             response.raise_for_status()
             return response.json()
         except Exception:
-            logger.debug("Graph API fetch failed for leadgen_id=%s, using mock data", leadgen_id)
-            # Fallback mock payload for local dev/testing
-            return {
-                "id": leadgen_id,
-                "campaign_name": "Meta Lead Campaign",
-                "form_id": "Form_991",
-                "field_data": [
-                    {"name": "full_name", "values": ["Sample Meta Lead"]},
-                    {"name": "email", "values": ["lead@example.com"]},
-                    {"name": "phone_number", "values": ["+14155550199"]}
-                ]
-            }
+            raise RuntimeError("Meta lead fetch failed; check page access and retry") from None
+
 
 
 

@@ -138,6 +138,14 @@ def list_campaigns(
     if created_any:
         db.commit()
 
+    # Imported leads originally stored only a campaign name. Link them so
+    # campaign assignment also grants the intended agent access to those leads.
+    for campaign in db.query(Campaign).filter(Campaign.org_id == current_user.org_id).all():
+        db.query(Lead).filter(Lead.org_id == current_user.org_id,
+                              Lead.campaign_id.is_(None), Lead.campaign_name == campaign.name).update(
+            {Lead.campaign_id: campaign.id}, synchronize_session=False)
+    db.commit()
+
     # 2. Query campaigns for current user
     q = db.query(Campaign).filter(Campaign.org_id == current_user.org_id)
     if current_user.role == UserRole.agent:
@@ -221,6 +229,6 @@ def delete_campaign(
     ).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    db.delete(campaign)
+    campaign.is_active = False
     db.commit()
-    return {"status": "deleted", "id": campaign_id}
+    return {"status": "archived", "id": campaign_id}

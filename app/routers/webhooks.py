@@ -4,7 +4,6 @@ import json
 import logging
 
 import dateutil.parser
-from sqlalchemy import or_, and_
 
 import gspread
 from fastapi import APIRouter, Request, Response, Depends, HTTPException, BackgroundTasks
@@ -13,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import Lead, WhatsAppMessage, Organization, MetaPageConnection, GoogleSheetConnection
+from app.models import Lead, WhatsAppMessage, MetaPageConnection, GoogleSheetConnection
 from app.services.meta import fetch_lead_details, parse_field_data
 
 logger = logging.getLogger(__name__)
@@ -47,7 +46,7 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
             "Google Sheets sync skipped — GOOGLE_SHEETS_CREDENTIALS_FILE not configured. "
             "Lead: %s (sheet_id=%s)", lead.name, sheet_id
         )
-        return
+        raise RuntimeError("Google Sheets credentials are not configured")
 
     try:
         creds = Credentials.from_service_account_file(
@@ -55,7 +54,11 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
             scopes=["https://www.googleapis.com/auth/spreadsheets"],
         )
         client = gspread.authorize(creds)
+        client.set_timeout(30)
         sheet = client.open_by_key(sheet_id).worksheet(sheet_name)
+        marker = f'crm:{lead.org_id}:{lead.id}'
+        if marker in sheet.col_values(7):
+            return
         row = [
             lead.created_at.strftime("%Y-%m-%d %H:%M:%S") if lead.created_at else "",
             lead.name or "",
@@ -63,11 +66,12 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
             lead.phone or "",
             lead.campaign_name or "",
             lead.form_name or "",
+            marker,
         ]
         sheet.append_row(row)
         logger.info("Synced lead '%s' to Google Sheet %s/%s", lead.name, sheet_id, sheet_name)
     except Exception:
-        logger.exception("Google Sheets sync failed for lead '%s' to Google Sheet %s", lead.name, sheet_id)
+        raise RuntimeError("Google Sheets sync failed; check credentials, sheet sharing and worksheet name") from None
 
 
 # ---------- META LEAD ADS ----------
@@ -111,6 +115,24 @@ async def receive_meta_lead(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    from app.services.integration_queue import enqueue
+    for entry in body.get('entry', []):
+        page_id = str(entry.get('id', ''))
+        connections = db.query(MetaPageConnection).filter(
+            MetaPageConnection.page_id == page_id, MetaPageConnection.status == 'active'
+        ).all()
+        if len({c.org_id for c in connections}) != 1:
+            logger.warning('Ignoring unknown or ambiguous Meta page %s', page_id)
+            continue
+        for change in entry.get('changes', []):
+            lead_id = change.get('value', {}).get('leadgen_id')
+            if lead_id:
+                enqueue(db, connections[0].org_id, 'meta', f'meta:{connections[0].org_id}:{lead_id}', {'entry': [{'id': page_id, 'changes': [change]}]})
+    db.commit()
+    return {'status': 'queued'}
+
+
+async def process_meta_body(body, db):
     for entry in body.get("entry", []):
         page_id = str(entry.get("id", ""))
 
@@ -121,18 +143,10 @@ async def receive_meta_lead(
         ).first()
 
         if not conn:
-            # Fallback to first organization (useful for local testing / single-tenant)
-            org = db.query(Organization).first()
-            if not org:
-                logger.warning("Meta webhook: no matching page connection and no organization found for page_id=%s", page_id)
-                continue
-            org_id = org.id
-            access_token = settings.meta_app_secret  # fallback — replace with real token in prod
-            connected_forms: list = []
-        else:
-            org_id = conn.org_id
-            access_token = conn.access_token
-            connected_forms = conn.connected_forms or []
+            raise RuntimeError('Facebook page disconnected; reconnect before retrying')
+        org_id = conn.org_id
+        access_token = conn.access_token
+        connected_forms = conn.connected_forms or []
 
         for change in entry.get("changes", []):
             value = change.get("value", {})
@@ -152,35 +166,12 @@ async def receive_meta_lead(
             try:
                 details = await fetch_lead_details(leadgen_id, access_token=access_token)
             except Exception:
-                logger.exception("Meta webhook: failed to fetch lead details for leadgen_id=%s", leadgen_id)
-                continue
+                raise RuntimeError("Meta lead fetch failed; check page connection and retry") from None
             if not details:
-                logger.warning("Meta webhook: empty details for leadgen_id=%s", leadgen_id)
-                continue
+                raise RuntimeError("Meta returned empty lead details")
 
             fields = parse_field_data(details.get("field_data", []))
             
-            # Check for duplicates by phone/email and campaign
-            phone = fields.get("phone_number")
-            email = fields.get("email")
-            campaign_name = details.get("campaign_name")
-            
-            duplicate_conds = []
-            if phone:
-                duplicate_conds.append(and_(Lead.phone != None, Lead.phone != "", Lead.phone == phone))
-            if email:
-                duplicate_conds.append(and_(Lead.email != None, Lead.email != "", Lead.email == email))
-                
-            if duplicate_conds:
-                existing_duplicate = db.query(Lead).filter(
-                    Lead.org_id == org_id,
-                    Lead.campaign_name == campaign_name,
-                    or_(*duplicate_conds)
-                ).first()
-                if existing_duplicate:
-                    logger.debug("Duplicate lead by phone/email skipped for fb_lead_id=%s", leadgen_id)
-                    continue
-
             form_id = details.get("form_id")
 
             # Check if form is in connected forms (matching by string or dict id)
@@ -207,7 +198,16 @@ async def receive_meta_lead(
                 except Exception:
                     logger.debug("Failed to parse created_time for leadgen_id=%s", leadgen_id)
 
+            from app.models import Campaign
+            campaign = db.query(Campaign).filter(Campaign.org_id == org_id, Campaign.meta_form_id == form_id_str).first()
+            if not campaign and details.get('campaign_name'):
+                campaign = db.query(Campaign).filter(Campaign.org_id == org_id, Campaign.name == details['campaign_name']).first()
+                if not campaign:
+                    campaign = Campaign(org_id=org_id, name=details['campaign_name'], meta_form_id=form_id_str)
+                    db.add(campaign)
+                    db.flush()
             lead = Lead(
+                campaign_id=campaign.id if campaign else None,
                 org_id=org_id,
                 fb_lead_id=leadgen_id,
                 name=fields.get("full_name") or fields.get("name"),
@@ -218,18 +218,20 @@ async def receive_meta_lead(
                 raw_data=details,
                 created_at=created_at_val
             )
-            db.add(lead)
-            db.commit()
+            from app.services.lead_ingestion import insert_lead_once
+            lead, inserted = insert_lead_once(db, lead)
+            if not inserted:
+                continue
             db.refresh(lead)
             logger.info("New lead saved: id=%s name='%s' org_id=%s", lead.id, lead.name, org_id)
 
             # Trigger Google Sheets sync for all matching campaign connections
-            sync_lead_to_google_sheets(db, lead, background_tasks)
+            sync_lead_to_google_sheets(db, lead)
 
     return {"status": "ok"}
 
 
-def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: BackgroundTasks = None):
+def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: BackgroundTasks = None, *, commit=True):
     """Find all matching Google Sheets for this lead's campaign / org and append rows."""
     conns = db.query(GoogleSheetConnection).filter(
         GoogleSheetConnection.org_id == lead.org_id,
@@ -246,18 +248,10 @@ def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: Backgr
             matches = True
 
         if matches:
-            if background_tasks:
-                background_tasks.add_task(
-                    _sync_to_google_sheet,
-                    gs_conn.spreadsheet_id,
-                    gs_conn.sheet_name or "Sheet1",
-                    lead,
-                )
-            else:
-                try:
-                    _sync_to_google_sheet(gs_conn.spreadsheet_id, gs_conn.sheet_name or "Sheet1", lead)
-                except Exception as e:
-                    logger.warning("Google Sheet sync failed for lead %s: %s", lead.id, e)
+            from app.services.integration_queue import enqueue
+            enqueue(db, lead.org_id, 'sheets', f'sheets:{gs_conn.id}:{lead.id}', {'connection_id': gs_conn.id, 'lead_id': lead.id})
+    if commit:
+        db.commit()
 
 
 # ---------- WHATSAPP ----------
