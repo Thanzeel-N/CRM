@@ -26,7 +26,7 @@ const state = {
   activeLead: null,
   statusChart: null,
   campaignChart: null,
-  hideInactiveCampaigns: false,
+  hideInactiveCampaigns: true,
   // Pagination
   currentPage: 0,
   pageSize: 100,
@@ -792,7 +792,7 @@ window.refreshCampaignStatuses = async function() {
   if (btn) btn.disabled = true;
   try {
     const res = await api('/campaigns/sync-status', { method: 'POST' });
-    toast(`Campaigns refreshed from Meta: ${res.updated ?? 0} changed of ${res.checked ?? 0} checked`, 'success');
+    toast(`Campaigns refreshed from Meta: ${res.created ?? 0} discovered, ${res.updated ?? 0} updated of ${res.checked ?? 0} checked`, 'success');
   } catch (err) {
     toast(err.message || 'Failed to refresh campaign statuses', 'error');
   } finally {
