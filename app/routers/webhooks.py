@@ -301,6 +301,10 @@ async def process_meta_body(body, db):
                     campaign = Campaign(org_id=org_id, name=details['campaign_name'], meta_form_id=form_id_str)
                     db.add(campaign)
                     db.flush()
+            # Keep a link to the Meta ad campaign ID so we can later sync its live status.
+            meta_campaign_id = str(details.get('campaign_id')) if details.get('campaign_id') else None
+            if campaign and meta_campaign_id and campaign.meta_campaign_id is None:
+                campaign.meta_campaign_id = meta_campaign_id
             lead = Lead(
                 campaign_id=campaign.id if campaign else None,
                 org_id=org_id,

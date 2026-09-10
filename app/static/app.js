@@ -26,6 +26,7 @@ const state = {
   activeLead: null,
   statusChart: null,
   campaignChart: null,
+  showArchivedCampaigns: false,
   // Pagination
   currentPage: 0,
   pageSize: 100,
@@ -748,18 +749,48 @@ function updateCampaignMetrics() {
   document.getElementById('campStatSheets') .textContent = sheets;
 }
 
+window.toggleShowArchivedCampaigns = function() {
+  state.showArchivedCampaigns = !state.showArchivedCampaigns;
+  const btn = document.getElementById('showArchivedCampaignsBtn');
+  if (btn) {
+    btn.innerHTML = state.showArchivedCampaigns
+      ? '<i data-lucide="archive"></i> Hide archived'
+      : '<i data-lucide="archive"></i> Show archived';
+    lucide.createIcons();
+  }
+  renderCampaignsGrid();
+};
+
+window.refreshCampaignStatuses = async function() {
+  if (!state.token) return;
+  const btn = document.getElementById('refreshCampaignStatusBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/campaigns/sync-status', { method: 'POST' });
+    toast(`Campaigns refreshed from Meta: ${res.updated ?? 0} changed of ${res.checked ?? 0} checked`, 'success');
+  } catch (err) {
+    toast(err.message || 'Failed to refresh campaign statuses', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    loadCampaigns();
+  }
+};
+
 function renderCampaignsGrid() {
   const grid = document.getElementById('campaignsGrid');
   if (!grid) return;
-  if (!state.campaigns.length) {
+  const visible = state.showArchivedCampaigns
+    ? state.campaigns
+    : state.campaigns.filter(c => c.is_active);
+  if (!visible.length) {
     grid.innerHTML = `<div class="empty-state">
       <i data-lucide="megaphone"></i>
-      <p>No campaigns yet.<br>Create one to start assigning staff to leads.</p>
+      <p>${state.showArchivedCampaigns ? 'No campaigns yet.<br>Create one to start assigning staff to leads.' : 'No active campaigns right now.<br>Use "Refresh from Meta" to sync status, or click "Show archived".'}</p>
     </div>`;
     lucide.createIcons();
     return;
   }
-  grid.innerHTML = state.campaigns.map(c => {
+  grid.innerHTML = visible.map(c => {
     const sheetsList = (c.google_sheets || []).map(s => `
       <div class="campaign-sheet-item">
         <div class="campaign-sheet-name">

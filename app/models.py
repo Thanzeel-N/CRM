@@ -101,6 +101,7 @@ class Campaign(Base):
     name = Column(String(255), nullable=False)                    # e.g. "Summer Promo 2026"
     meta_form_id = Column(String(255), nullable=True)             # Meta Lead Form ID
     meta_ad_account_id = Column(String(255), nullable=True)       # Meta Ad Account ID
+    meta_campaign_id = Column(String(255), nullable=True, index=True)  # Meta Ad Campaign ID
     description = Column(Text, nullable=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Assigned agent
     is_active = Column(Boolean, default=True, nullable=False)

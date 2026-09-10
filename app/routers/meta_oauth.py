@@ -22,6 +22,69 @@ router = APIRouter(prefix="/integrations/facebook", tags=["facebook"])
 
 FB_API_BASE = "https://graph.facebook.com/v20.0"
 
+
+async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncClient = None) -> dict:
+    """Best-effort refresh of Campaign.is_active against Meta's live campaign/form status.
+
+    Uses the org's stored page tokens. If the token has ads permission it reads the ad
+    campaign's effective_status; otherwise it falls back to the connected form's status.
+    Statuses we cannot verify are left unchanged.
+    """
+    from app.models import Campaign
+    conns = db.query(MetaPageConnection).filter(
+        MetaPageConnection.org_id == org_id,
+        MetaPageConnection.status == "active",
+    ).all()
+    if not conns:
+        return {"checked": 0, "updated": 0}
+
+    form_status = {}
+    for conn in conns:
+        for f in (conn.connected_forms or []):
+            if isinstance(f, dict) and f.get("id"):
+                form_status[str(f["id"])] = (f.get("status") or "").upper()
+
+    campaigns = db.query(Campaign).filter(Campaign.org_id == org_id).all()
+    checked = 0
+    updated = 0
+
+    _owned_client = client or httpx.AsyncClient()
+    try:
+        for camp in campaigns:
+            new_active = None
+
+            # 1. Live ad-campaign status (requires ads permission; best effort)
+            if camp.meta_campaign_id:
+                token = conns[0].access_token
+                try:
+                    url = f"{FB_API_BASE}/{camp.meta_campaign_id}"
+                    resp = await _owned_client.get(url, params={"access_token": token, "fields": "status,effective_status"})
+                    data = resp.json()
+                    eff = (data.get("effective_status") or data.get("status") or "").upper()
+                    if eff:
+                        new_active = (eff == "ACTIVE")
+                        checked += 1
+                except Exception:
+                    pass
+
+            # 2. Fallback: connected Meta lead form status
+            if new_active is None and camp.meta_form_id:
+                st = form_status.get(str(camp.meta_form_id))
+                if st:
+                    new_active = (st == "ACTIVE")
+                    checked += 1
+
+            if new_active is not None and camp.is_active != new_active:
+                camp.is_active = new_active
+                updated += 1
+    finally:
+        if client is None:
+            await _owned_client.aclose()
+
+    if updated:
+        db.commit()
+    return {"checked": checked, "updated": updated}
+
 def create_fb_session_token(user_access_token: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=60)
     to_encode = {"exp": expire, "user_access_token": user_access_token}
@@ -318,11 +381,13 @@ async def connect_page(
                 if isinstance(item, dict):
                     fid = str(item.get("id"))
                     fname = item.get("name") or f"Form #{fid}"
+                    fstatus = item.get("status")
                 else:
                     fid = str(item)
                     fname = f"Form #{fid}"
+                    fstatus = None
                 clean_form_ids.append(fid)
-                forms_meta.append({"id": fid, "name": fname})
+                forms_meta.append({"id": fid, "name": fname, "status": fstatus})
                 form_map[fid] = fname
 
             # 3. Historical Lead Sync
@@ -435,11 +500,19 @@ async def connect_page(
         
     db.commit()
     db.refresh(conn)
-    
+
+    # Reflect Meta's live campaign state (stopped -> archived, active -> active).
+    status_results = {"checked": 0, "updated": 0}
+    try:
+        status_results = await sync_campaign_statuses(db, current_user.org_id)
+    except Exception as exc:
+        logger.warning("Campaign status refresh failed during page connect: %s", exc)
+
     return {
         "status": "success", 
         "id": conn.id,
-        "sync_results": sync_results
+        "sync_results": sync_results,
+        "campaign_statuses": status_results
     }
 
 @router.get("/connections")
@@ -536,7 +609,7 @@ async def sync_facebook_leads(
             if not clean_form_ids and page_access_token:
                 try:
                     url_forms = f"{FB_API_BASE}/{page_id}/leadgen_forms"
-                    resp = await client.get(url_forms, params={"access_token": page_access_token, "fields": "id,name"})
+                    resp = await client.get(url_forms, params={"access_token": page_access_token, "fields": "id,name,status"})
                     try:
                         data = resp.json()
                     except Exception:
@@ -561,11 +634,13 @@ async def sync_facebook_leads(
                             fbtrace_id
                         )
                     elif "data" in data:
-                        for f in data["data"]:
-                            fid = str(f["id"])
-                            fname = f.get("name") or f"Form #{fid}"
-                            clean_form_ids.append(fid)
-                            form_map[fid] = fname
+                        fc = [{"id": str(f["id"]), "name": f.get("name") or f"Form #{f['id']}", "status": f.get("status")} for f in data["data"]]
+                        if conn.connected_forms != fc:
+                            conn.connected_forms = fc
+                            db.commit()
+                        for f in fc:
+                            clean_form_ids.append(f["id"])
+                            form_map[f["id"]] = f["name"]
                 except Exception as ex:
                     logger.warning(f"Could not fetch forms for page {page_id}: {ex}")
 
@@ -653,8 +728,18 @@ async def sync_facebook_leads(
                     sync_results["failed_forms"] += 1
 
     db.commit()
+
+    # Reflect Meta's live campaign state (stopped -> archived, active -> active).
+    status_results = {"checked": 0, "updated": 0}
+    if conns:
+        try:
+            status_results = await sync_campaign_statuses(db, current_user.org_id)
+        except Exception as exc:
+            logger.warning("Campaign status refresh failed during Meta sync: %s", exc)
+
     return {
         "status": "success",
-        "sync_results": sync_results
+        "sync_results": sync_results,
+        "campaign_statuses": status_results
     }
 

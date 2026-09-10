@@ -19,3 +19,7 @@ def upgrade_workflow(connection):
     for name in ('owner_id', 'follow_up_at'):
         if f'ix_leads_{name}' not in indexes:
             connection.execute(text(f'CREATE INDEX ix_leads_{name} ON leads ({name})'))
+    if 'campaigns' in inspect(connection).get_table_names():
+        campaign_columns = {c['name'] for c in inspect(connection).get_columns('campaigns')}
+        if 'meta_campaign_id' not in campaign_columns:
+            connection.execute(text('ALTER TABLE campaigns ADD COLUMN meta_campaign_id VARCHAR(255)'))

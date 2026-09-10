@@ -1,6 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -100,6 +100,7 @@ def _campaign_out(c: Campaign, db: Session) -> CampaignOut:
 
 @router.get("", response_model=List[CampaignOut])
 def list_campaigns(
+    status: Optional[str] = Query(None, description="Filter by 'active', 'archived', or leave empty for all"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -144,14 +145,56 @@ def list_campaigns(
         db.query(Lead).filter(Lead.org_id == current_user.org_id,
                               Lead.campaign_id.is_(None), Lead.campaign_name == campaign.name).update(
             {Lead.campaign_id: campaign.id}, synchronize_session=False)
+        # Backfill the Meta campaign ID so live Meta status can be synced later.
+        if campaign.meta_campaign_id is None:
+            row = db.query(Lead.raw_data).filter(
+                Lead.org_id == current_user.org_id,
+                Lead.campaign_name == campaign.name,
+                Lead.raw_data != None,
+            ).first()
+            if row and isinstance(row[0], dict) and row[0].get("campaign_id"):
+                campaign.meta_campaign_id = str(row[0]["campaign_id"])
     db.commit()
 
     # 2. Query campaigns for current user
     q = db.query(Campaign).filter(Campaign.org_id == current_user.org_id)
     if current_user.role == UserRole.agent:
         q = q.filter(Campaign.assigned_user_id == current_user.id)
+    if status == "active":
+        q = q.filter(Campaign.is_active == True)
+    elif status == "archived":
+        q = q.filter(Campaign.is_active == False)
     campaigns = q.order_by(Campaign.created_at.desc()).all()
     return [_campaign_out(c, db) for c in campaigns]
+
+
+@router.post("/sync-status")
+async def sync_meta_campaign_statuses(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Refresh Campaign.is_active from Meta's live campaign/form status.
+    Stopped or deleted Meta campaigns are archived here automatically."""
+    _require_admin(current_user)
+
+    # Backfill Meta campaign IDs from leads before refreshing statuses.
+    from app.models import Lead
+    for campaign in db.query(Campaign).filter(
+        Campaign.org_id == current_user.org_id,
+        Campaign.meta_campaign_id.is_(None),
+    ).all():
+        row = db.query(Lead.raw_data).filter(
+            Lead.org_id == current_user.org_id,
+            Lead.campaign_name == campaign.name,
+            Lead.raw_data != None,
+        ).first()
+        if row and isinstance(row[0], dict) and row[0].get("campaign_id"):
+            campaign.meta_campaign_id = str(row[0]["campaign_id"])
+    db.commit()
+
+    from app.routers.meta_oauth import sync_campaign_statuses
+    result = await sync_campaign_statuses(db, current_user.org_id)
+    return {"status": "success", **result}
 
 
 @router.post("", response_model=CampaignOut)
