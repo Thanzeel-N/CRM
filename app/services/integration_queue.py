@@ -73,6 +73,8 @@ async def process_one():
                 if {c.org_id for c in conns} != {job.org_id}:
                     raise RuntimeError('Facebook page connection changed; reconnect the correct organization')
                 await asyncio.wait_for(process_meta_body(job.payload, db), timeout=120)
+            elif job.kind == 'meta_import':
+                await asyncio.wait_for(_import_form_leads(job, db), timeout=600)
             else:
                 connection = db.query(GoogleSheetConnection).filter(GoogleSheetConnection.id == job.payload['connection_id'], GoogleSheetConnection.org_id == job.org_id, GoogleSheetConnection.status == 'active').first()
                 lead = db.query(Lead).filter(Lead.id == job.payload['lead_id'], Lead.org_id == job.org_id).first()
@@ -112,6 +114,97 @@ async def process_one():
                     SheetDeliveryLock.token == token).update({'expires_at': now(), 'token': None}, synchronize_session=False)
         db.commit()
         return True
+
+
+async def _import_form_leads(job, db):
+    """Paginate all historical leads from one Meta form and insert them into the CRM."""
+    import httpx
+    import dateutil.parser
+    from app.services.lead_ingestion import insert_lead_once
+    from app.services.meta import parse_field_data, extract_field, PHONE_FIELD_NAMES, EMAIL_FIELD_NAMES, NAME_FIELD_NAMES
+
+    payload = job.payload
+    page_id = payload['page_id']
+    form_id = payload['form_id']
+    form_name = payload.get('form_name') or f'Form #{form_id}'
+
+    conn = db.query(MetaPageConnection).filter(
+        MetaPageConnection.page_id == page_id,
+        MetaPageConnection.org_id == job.org_id,
+        MetaPageConnection.status == 'active',
+    ).first()
+    if not conn:
+        raise RuntimeError('Meta page connection no longer active; reconnect before retrying')
+
+    access_token = conn.access_token
+    FB_API_BASE = 'https://graph.facebook.com/v20.0'
+    url_leads = f'{FB_API_BASE}/{form_id}/leads'
+    params_leads = {
+        'access_token': access_token,
+        'fields': 'id,created_time,field_data,campaign_id,campaign_name,form_id',
+        'limit': 100,
+    }
+
+    imported = 0
+    skipped = 0
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        while url_leads:
+            resp = await client.get(url_leads, params=params_leads)
+            data = resp.json()
+            if 'error' in data:
+                raise RuntimeError(f"Meta API error fetching leads for form {form_id}: {data['error'].get('message')}")
+
+            for l in data.get('data', []):
+                fb_lead_id = l.get('id')
+                if not fb_lead_id:
+                    continue
+
+                fields = parse_field_data(l.get('field_data', []))
+                created_at_val = None
+                if 'created_time' in l:
+                    try:
+                        created_at_val = dateutil.parser.parse(l['created_time'])
+                    except Exception:
+                        pass
+
+                target_form_id = str(l.get('form_id') or form_id)
+                from app.models import Lead
+                new_lead = Lead(
+                    org_id=job.org_id,
+                    fb_lead_id=fb_lead_id,
+                    name=extract_field(fields, *NAME_FIELD_NAMES),
+                    email=extract_field(fields, *EMAIL_FIELD_NAMES),
+                    phone=extract_field(fields, *PHONE_FIELD_NAMES),
+                    campaign_name=l.get('campaign_name'),
+                    form_name=form_name,
+                    raw_data={**l, 'form_id': target_form_id},
+                    created_at=created_at_val,
+                )
+                new_lead, inserted = insert_lead_once(db, new_lead)
+                if inserted:
+                    from app.routers.webhooks import sync_lead_to_google_sheets
+                    sync_lead_to_google_sheets(db, new_lead, commit=False)
+                    imported += 1
+                else:
+                    skipped += 1
+
+            url_leads = data.get('paging', {}).get('next')
+            params_leads = None
+
+    db.commit()
+    logger.info('meta_import form=%s org=%s: imported=%s skipped=%s', form_id, job.org_id, imported, skipped)
+
+
+def enqueue_import(db, org_id, page_id, form_id, form_name):
+    """Enqueue a background historical lead import for one Meta form."""
+    import uuid
+    key = f'meta_import:{org_id}:{page_id}:{form_id}'
+    enqueue(db, org_id, 'meta_import', key, {
+        'page_id': page_id,
+        'form_id': form_id,
+        'form_name': form_name,
+    })
 
 
 async def worker():

@@ -457,6 +457,22 @@ async def connect_page(
         "failed_forms": 0
     }
     
+    forms_meta = []
+    clean_form_ids = []
+    form_map = {}
+    for item in forms:
+        if isinstance(item, dict):
+            fid = str(item.get("id"))
+            fname = item.get("name") or f"Form #{fid}"
+            fstatus = item.get("status")
+        else:
+            fid = str(item)
+            fname = f"Form #{fid}"
+            fstatus = None
+        clean_form_ids.append(fid)
+        forms_meta.append({"id": fid, "name": fname, "status": fstatus})
+        form_map[fid] = fname
+
     if settings.meta_app_id == "local_dev_meta_app_id":
         page_access_token = "mock_page_token"
     else:
@@ -511,107 +527,9 @@ async def connect_page(
                     logger.error(f"Webhook subscription failed for page {page_id}: {err_msg}")
                     raise HTTPException(status_code=400, detail=f"Webhook subscription failed: {err_msg}")
                 
-                forms_meta = []
-                clean_form_ids = []
-                form_map = {}
-                for item in forms:
-                    if isinstance(item, dict):
-                        fid = str(item.get("id"))
-                        fname = item.get("name") or f"Form #{fid}"
-                        fstatus = item.get("status")
-                    else:
-                        fid = str(item)
-                        fname = f"Form #{fid}"
-                        fstatus = None
-                    clean_form_ids.append(fid)
-                    forms_meta.append({"id": fid, "name": fname, "status": fstatus})
-                    form_map[fid] = fname
+                # Historical lead sync is offloaded to the background queue —
+                # enqueue_import calls happen after the DB save below.
 
-                # 3. Historical Lead Sync
-                seen_lead_ids = set()
-                for form_id in clean_form_ids:
-                    url_leads = f"{FB_API_BASE}/{form_id}/leads"
-                    params_leads = {
-                        "access_token": page_access_token,
-                        "fields": "id,created_time,field_data,campaign_id,campaign_name,form_id"
-                    }
-                    
-                    try:
-                        form_success = True
-                        while url_leads:
-                            resp_leads = await client.get(url_leads, params=params_leads)
-                            leads_data = resp_leads.json()
-                            
-                            if "error" in leads_data:
-                                logger.error(f"Error syncing leads for form {form_id}: {leads_data['error']}")
-                                form_success = False
-                                break
-                                
-                            # Process leads
-                            for l in leads_data.get("data", []):
-                                fb_lead_id = l.get("id")
-                                if not fb_lead_id or fb_lead_id in seen_lead_ids:
-                                    sync_results["duplicates_skipped"] += 1
-                                    continue
-                                    
-                                existing = db.query(Lead).filter(
-                                    Lead.fb_lead_id == fb_lead_id,
-                                    Lead.org_id == current_user.org_id
-                                ).first()
-                                
-                                if existing:
-                                    seen_lead_ids.add(fb_lead_id)
-                                    sync_results["duplicates_skipped"] += 1
-                                    continue
-                                    
-                                fields = parse_field_data(l.get("field_data", []))
-                                
-                                created_at_val = None
-                                if "created_time" in l:
-                                    try:
-                                        created_at_val = dateutil.parser.parse(l["created_time"])
-                                    except Exception:
-                                        pass
-                                
-                                target_form_id = str(l.get("form_id") or form_id)
-                                resolved_form_name = form_map.get(target_form_id, f"Form #{target_form_id}")
-
-                                new_lead = Lead(
-                                    org_id=current_user.org_id,
-                                    fb_lead_id=fb_lead_id,
-                                    name=extract_field(fields, *NAME_FIELD_NAMES),
-                                    email=extract_field(fields, *EMAIL_FIELD_NAMES),
-                                    phone=extract_field(fields, *PHONE_FIELD_NAMES),
-                                    campaign_name=l.get("campaign_name"),
-                                    form_name=resolved_form_name,
-                                    raw_data={**l, "form_id": target_form_id},
-                                    created_at=created_at_val
-                                )
-                                from app.services.lead_ingestion import insert_lead_once
-                                new_lead, inserted = insert_lead_once(db, new_lead)
-                                if not inserted:
-                                    seen_lead_ids.add(fb_lead_id)
-                                    sync_results["duplicates_skipped"] += 1
-                                    continue
-                                from app.routers.webhooks import sync_lead_to_google_sheets
-                                sync_lead_to_google_sheets(db, new_lead, commit=False)
-                                seen_lead_ids.add(fb_lead_id)
-                                sync_results["leads_imported"] += 1
-                                
-                            # Pagination
-                            paging = leads_data.get("paging", {})
-                            url_leads = paging.get("next")
-                            params_leads = None
-                            
-                        if form_success:
-                            sync_results["forms_synced"] += 1
-                        else:
-                            sync_results["failed_forms"] += 1
-                            
-                    except Exception as e:
-                        logger.exception(f"Exception syncing form {form_id}: {e}")
-                        sync_results["failed_forms"] += 1
-                
         except HTTPException:
             raise
         except httpx.TimeoutException as exc:
@@ -626,11 +544,11 @@ async def connect_page(
         MetaPageConnection.org_id == current_user.org_id,
         MetaPageConnection.page_id == page_id
     ).first()
-    
+
     if conn:
         conn.page_name = page_name
         conn.access_token = page_access_token
-        conn.connected_forms = forms_meta if 'forms_meta' in locals() else forms
+        conn.connected_forms = forms_meta
         conn.status = "active"
     else:
         conn = MetaPageConnection(
@@ -639,13 +557,19 @@ async def connect_page(
             page_id=page_id,
             page_name=page_name,
             access_token=page_access_token,
-            connected_forms=forms_meta if 'forms_meta' in locals() else forms,
+            connected_forms=forms_meta,
             status="active"
         )
         db.add(conn)
-        
+
     db.commit()
     db.refresh(conn)
+
+    # 5. Enqueue background import for each form (non-blocking).
+    from app.services.integration_queue import enqueue_import
+    for fid, fname in form_map.items():
+        enqueue_import(db, current_user.org_id, page_id, fid, fname)
+    db.commit()
 
     # Reflect Meta's live campaign state (stopped -> archived, active -> active).
     status_results = {"checked": 0, "updated": 0}
@@ -655,8 +579,9 @@ async def connect_page(
         logger.warning("Campaign status refresh failed during page connect: %s", exc)
 
     return {
-        "status": "success", 
+        "status": "success",
         "id": conn.id,
+        "forms_queued": len(form_map),
         "sync_results": sync_results,
         "campaign_statuses": status_results
     }

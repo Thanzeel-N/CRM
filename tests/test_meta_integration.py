@@ -130,15 +130,13 @@ async def test_connect_page_webhook_failure():
 
 @pytest.mark.asyncio
 async def test_connect_page_successful_sync_with_pagination():
-    """Test successful connection, pagination of historical leads, and idempotency."""
+    """Test successful connection: the endpoint returns quickly and queues background imports."""
     with patch("httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
         mock_client_class.return_value.__aenter__.return_value = mock_client
-        
-        # 1. /me/permissions
-        # 2. /me/accounts
-        # 3. /form_1/leads (page 1)
-        # 4. /form_1/leads (page 2)
+
+        # Only 2 API calls now: /me/permissions and /me/accounts
+        # Historical lead sync is offloaded to the background queue.
         mock_client.get.side_effect = [
             create_mock_response({
                 "data": [
@@ -153,23 +151,10 @@ async def test_connect_page_successful_sync_with_pagination():
                     {"id": "123", "access_token": "page_token_123"}
                 ]
             }),
-            create_mock_response({
-                "data": [
-                    {"id": "lead_1", "campaign_name": "C1", "form_id": "form_1", "field_data": [{"name": "email", "values": ["a@b.com"]}]}
-                ],
-                "paging": {"next": "http://graph.facebook.com/next_page"}
-            }),
-            create_mock_response({
-                "data": [
-                    {"id": "lead_2", "campaign_name": "C1", "form_id": "form_1", "field_data": [{"name": "email", "values": ["c@d.com"]}]},
-                    # Add duplicate lead_1 to test idempotency
-                    {"id": "lead_1", "campaign_name": "C1", "form_id": "form_1", "field_data": [{"name": "email", "values": ["a@b.com"]}]}
-                ]
-            })
         ]
-        
+
         mock_client.post.return_value = create_mock_response({"success": True})
-        
+
         valid_token = create_fb_session_token("mock_user_token")
         response = client.post("/integrations/facebook/connect", json={
             "fb_session_token": valid_token,
@@ -177,32 +162,31 @@ async def test_connect_page_successful_sync_with_pagination():
             "page_name": "Test Page",
             "forms": ["form_1"]
         })
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "success"
-        
-        # Check sync stats
-        stats = data["sync_results"]
-        assert stats["forms_synced"] == 1
-        assert stats["leads_imported"] == 2
-        assert stats["duplicates_skipped"] == 1
-        assert stats["failed_forms"] == 0
-        
-        # Check database
+
+        # Historical sync is now done in the background — endpoint returns immediately.
+        # forms_queued tells the frontend how many background jobs were scheduled.
+        assert data["forms_queued"] == 1
+
+        # The connection should still be saved to DB.
         db = TestingSessionLocal()
-        leads = db.query(Lead).all()
-        assert len(leads) == 2
+        from app.models import MetaPageConnection
+        saved = db.query(MetaPageConnection).filter_by(page_id="123").first()
+        assert saved is not None
+        assert saved.page_name == "Test Page"
         db.close()
 
 
 @pytest.mark.asyncio
 async def test_connect_page_failed_form_sync():
-    """Test that a failed form sync does not crash the entire process, but reports failure."""
+    """Test that connection succeeds even when API calls only do permissions+webhook (sync is background)."""
     with patch("httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
         mock_client_class.return_value.__aenter__.return_value = mock_client
-        
+
         mock_client.get.side_effect = [
             create_mock_response({
                 "data": [
@@ -217,18 +201,10 @@ async def test_connect_page_failed_form_sync():
                     {"id": "123", "access_token": "page_token_123"}
                 ]
             }),
-            # Form 1 fails
-            create_mock_response({"error": {"message": "API Error on form 1"}}),
-            # Form 2 succeeds
-            create_mock_response({
-                "data": [
-                    {"id": "lead_3", "campaign_name": "C2", "form_id": "form_2", "field_data": [{"name": "email", "values": ["e@f.com"]}]}
-                ]
-            })
         ]
-        
+
         mock_client.post.return_value = create_mock_response({"success": True})
-        
+
         valid_token = create_fb_session_token("mock_user_token")
         response = client.post("/integrations/facebook/connect", json={
             "fb_session_token": valid_token,
@@ -236,9 +212,9 @@ async def test_connect_page_failed_form_sync():
             "page_name": "Test Page",
             "forms": ["form_1", "form_2"]
         })
-        
+
         assert response.status_code == 200
-        stats = response.json()["sync_results"]
-        assert stats["failed_forms"] == 1
-        assert stats["forms_synced"] == 1
-        assert stats["leads_imported"] == 1
+        data = response.json()
+        assert data["status"] == "success"
+        # 2 forms queued for background import
+        assert data["forms_queued"] == 2
