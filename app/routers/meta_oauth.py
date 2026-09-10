@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import User, MetaPageConnection, Lead
 from app.services.auth import get_current_user, SECRET_KEY, ALGORITHM
-from app.services.meta import parse_field_data
+from app.services.meta import parse_field_data, extract_field, PHONE_FIELD_NAMES, EMAIL_FIELD_NAMES, NAME_FIELD_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -377,9 +377,9 @@ async def connect_page(
                             new_lead = Lead(
                                 org_id=current_user.org_id,
                                 fb_lead_id=fb_lead_id,
-                                name=fields.get("full_name") or fields.get("name"),
-                                email=fields.get("email"),
-                                phone=fields.get("phone_number"),
+                                name=extract_field(fields, *NAME_FIELD_NAMES),
+                                email=extract_field(fields, *EMAIL_FIELD_NAMES),
+                                phone=extract_field(fields, *PHONE_FIELD_NAMES),
                                 campaign_name=l.get("campaign_name"),
                                 form_name=resolved_form_name,
                                 raw_data=l,
@@ -620,9 +620,9 @@ async def sync_facebook_leads(
                             new_lead = Lead(
                                 org_id=current_user.org_id,
                                 fb_lead_id=fb_lead_id,
-                                name=fields.get("full_name") or fields.get("name") or "Meta Lead",
-                                email=fields.get("email"),
-                                phone=fields.get("phone_number"),
+                                name=extract_field(fields, *NAME_FIELD_NAMES) or "Meta Lead",
+                                email=extract_field(fields, *EMAIL_FIELD_NAMES),
+                                phone=extract_field(fields, *PHONE_FIELD_NAMES),
                                 campaign_name=l.get("campaign_name"),
                                 form_name=resolved_form_name,
                                 raw_data=l,

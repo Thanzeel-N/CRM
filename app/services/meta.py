@@ -39,3 +39,18 @@ def parse_field_data(field_data: list) -> dict:
         values = field.get("values", [])
         parsed[key] = values[0] if values else None
     return parsed
+
+
+# Common Meta lead form field-name variants so we never lose a phone/email/name.
+PHONE_FIELD_NAMES = ("phone_number", "phone", "mobile_number", "whatsapp_number", "telephone", "tel", "cell")
+EMAIL_FIELD_NAMES = ("email", "email_address")
+NAME_FIELD_NAMES = ("full_name", "fullname", "name", "first_name", "last_name")
+
+
+def extract_field(fields: dict, *names) -> str | None:
+    """Return the first non-empty value from a parsed field dict across field-name variants."""
+    for name in names:
+        value = fields.get(name)
+        if value:
+            return str(value)
+    return None

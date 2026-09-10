@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import Lead, WhatsAppMessage, MetaPageConnection, GoogleSheetConnection
-from app.services.meta import fetch_lead_details, parse_field_data
+from app.services.meta import fetch_lead_details, parse_field_data, extract_field, PHONE_FIELD_NAMES, EMAIL_FIELD_NAMES, NAME_FIELD_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,8 @@ def _collect_custom_fields(leads: list) -> list:
     """Return unique Meta form-question/field names found across leads' raw_data."""
     custom = []
     std_lower = {h.lower() for h in SHEET_STANDARD_HEADERS}
+    # Phone/email/name variants fold into the standard columns, not extra columns.
+    swallowed = set(PHONE_FIELD_NAMES) | set(EMAIL_FIELD_NAMES) | set(NAME_FIELD_NAMES)
     for lead in leads:
         raw = lead.raw_data or {}
         field_data = raw.get("field_data") if isinstance(raw, dict) else None
@@ -63,7 +65,7 @@ def _collect_custom_fields(leads: list) -> list:
             continue
         for field in field_data:
             name = (field.get("name") or "").strip()
-            if name and name.lower() not in std_lower and name not in custom:
+            if name and name.lower() not in std_lower and name.lower() not in swallowed and name not in custom:
                 custom.append(name)
     return custom
 
@@ -84,17 +86,31 @@ def _read_sheet_headers(worksheet) -> list | None:
     return None
 
 
+def _raw_field_value(lead: Lead, *names) -> str:
+    """Return the first non-empty value from the lead's Meta raw field_data."""
+    raw = lead.raw_data or {}
+    field_data = raw.get("field_data") if isinstance(raw, dict) else None
+    if isinstance(field_data, list):
+        wanted = {n.strip().lower() for n in names}
+        for field in field_data:
+            if (field.get("name") or "").strip().lower() in wanted:
+                values = field.get("values") or []
+                if values:
+                    return str(values[0])
+    return ""
+
+
 def _lead_header_value(lead: Lead, header: str) -> str:
     """Map a header name to the lead's value for that column."""
     key = (header or "").strip().lower()
     if key == "date":
         return lead.created_at.strftime("%Y-%m-%d %H:%M:%S") if lead.created_at else ""
     if key == "name":
-        return lead.name or ""
+        return lead.name or _raw_field_value(lead, *NAME_FIELD_NAMES)
     if key == "email":
-        return lead.email or ""
+        return lead.email or _raw_field_value(lead, *EMAIL_FIELD_NAMES)
     if key == "phone":
-        return lead.phone or ""
+        return lead.phone or _raw_field_value(lead, *PHONE_FIELD_NAMES)
     if key == "campaign":
         return lead.campaign_name or ""
     if key == "form":
@@ -289,9 +305,9 @@ async def process_meta_body(body, db):
                 campaign_id=campaign.id if campaign else None,
                 org_id=org_id,
                 fb_lead_id=leadgen_id,
-                name=fields.get("full_name") or fields.get("name"),
-                email=fields.get("email"),
-                phone=fields.get("phone_number"),
+                name=extract_field(fields, *NAME_FIELD_NAMES),
+                email=extract_field(fields, *EMAIL_FIELD_NAMES),
+                phone=extract_field(fields, *PHONE_FIELD_NAMES),
                 campaign_name=details.get("campaign_name"),
                 form_name=resolved_form_name,
                 raw_data=details,
