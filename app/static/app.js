@@ -26,7 +26,7 @@ const state = {
   activeLead: null,
   statusChart: null,
   campaignChart: null,
-  hideInactiveCampaigns: true,
+  hideInactiveCampaigns: false,
   // Pagination
   currentPage: 0,
   pageSize: 100,

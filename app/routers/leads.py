@@ -138,42 +138,37 @@ async def list_lead_forms(
 
     # 2. Backfill existing leads where form_name is raw numeric form ID
     if form_map:
-        numeric_leads = db.query(Lead).filter(
-            Lead.org_id == current_user.org_id
-        ).all()
-        updated_forms = False
-        for l in numeric_leads:
-            if l.form_name and l.form_name in form_map:
-                l.form_name = form_map[l.form_name]
-                updated_forms = True
-        if updated_forms:
-            db.commit()
+        numeric_keys = [k for k in form_map.keys() if k.isdigit()]
+        if numeric_keys:
+            leads_to_update = db.query(Lead).filter(
+                Lead.org_id == current_user.org_id,
+                Lead.form_name.in_(numeric_keys)
+            ).all()
+            updated_forms = False
+            for l in leads_to_update:
+                if l.form_name in form_map:
+                    l.form_name = form_map[l.form_name]
+                    updated_forms = True
+            if updated_forms:
+                db.commit()
 
-    # 2.5 Backfill created_at from raw_data if available
-    try:
-        leads_to_fix = db.query(Lead).filter(
-            Lead.org_id == current_user.org_id,
-            Lead.raw_data != None
-        ).all()
-        date_updated = False
-        for l in leads_to_fix:
-            if isinstance(l.raw_data, dict) and "created_time" in l.raw_data:
-                try:
-                    parsed_dt = dateutil.parser.parse(l.raw_data["created_time"])
-                    if l.created_at != parsed_dt:
-                        l.created_at = parsed_dt
-                        date_updated = True
-                except Exception:
-                    logger.debug("Failed to parse created_time for lead %s", l.id)
-        if date_updated:
-            db.commit()
-    except Exception:
-        logger.debug("dateutil.parser not available, skipping date backfill")
-    # 3. Query distinct form names
-    forms_db = db.query(Lead.form_name).filter(
+    # 3. Query distinct form names with optional campaign filter
+    q_forms = db.query(Lead.form_name).filter(
         Lead.org_id == current_user.org_id,
         Lead.form_name != None
-    ).distinct().all()
+    )
+    if campaign_id:
+        from app.models import Campaign
+        camp = db.query(Campaign).filter(
+            Campaign.org_id == current_user.org_id,
+            (Campaign.name == campaign_id) | (Campaign.meta_campaign_id == campaign_id)
+        ).first()
+        if camp:
+            q_forms = q_forms.filter((Lead.campaign_id == camp.id) | (Lead.campaign_name == camp.name))
+        else:
+            q_forms = q_forms.filter(Lead.campaign_name == campaign_id)
+
+    forms_db = q_forms.distinct().all()
 
     result = []
     seen = set()

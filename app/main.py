@@ -64,11 +64,13 @@ app.add_middleware(
 )
 
 # ── Database ───────────────────────────────────────────────────────────────────
+from app.schema_upgrade import upgrade_workflow
+with engine.begin() as connection:
+    upgrade_workflow(connection)
+
 if not is_production:
     Base.metadata.create_all(bind=engine)
-    from app.schema_upgrade import upgrade_workflow
     with engine.begin() as connection:
-        upgrade_workflow(connection)
         from app.services.lead_deduplication import repair_and_enforce_unique_sources
         repair_and_enforce_unique_sources(connection)
 
