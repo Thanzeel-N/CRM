@@ -518,7 +518,8 @@ async def connect_page(
 @router.get("/connections")
 def list_connections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conns = db.query(MetaPageConnection).filter(
-        MetaPageConnection.org_id == current_user.org_id
+        MetaPageConnection.org_id == current_user.org_id,
+        MetaPageConnection.status == "active"
     ).order_by(MetaPageConnection.created_at.desc()).all()
     
     unique_conns = {}
@@ -556,8 +557,8 @@ async def disconnect_page(
         params = {"access_token": conn.access_token}
         async with httpx.AsyncClient() as client:
             await client.delete(url_sub, params=params)
-            
-    conn.status = "disconnected"
+
+    db.delete(conn)
     db.commit()
     
     return {"status": "disconnected"}
