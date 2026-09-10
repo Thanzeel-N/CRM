@@ -34,14 +34,100 @@ def _verify_meta_signature(body: bytes, signature_header: str | None) -> bool:
     return hmac.compare_digest(expected, signature_header)
 
 
+# Standard column order used for every Google Sheet connection.
+# Custom Meta form question names are added after these and before "CRM Marker".
+SHEET_STANDARD_HEADERS = ["Date", "Name", "Email", "Phone", "Campaign", "Form"]
+
+
+def _authorized_client():
+    creds_file = settings.google_sheets_credentials_file
+    if not creds_file:
+        raise RuntimeError("Google Sheets credentials are not configured")
+    creds = Credentials.from_service_account_file(
+        creds_file,
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    client = gspread.authorize(creds)
+    client.set_timeout(30)
+    return client
+
+
+def _collect_custom_fields(leads: list) -> list:
+    """Return unique Meta form-question/field names found across leads' raw_data."""
+    custom = []
+    std_lower = {h.lower() for h in SHEET_STANDARD_HEADERS}
+    for lead in leads:
+        raw = lead.raw_data or {}
+        field_data = raw.get("field_data") if isinstance(raw, dict) else None
+        if not isinstance(field_data, list):
+            continue
+        for field in field_data:
+            name = (field.get("name") or "").strip()
+            if name and name.lower() not in std_lower and name not in custom:
+                custom.append(name)
+    return custom
+
+
+def build_sheet_headers(leads: list) -> list:
+    """Column headers for a sheet: standard columns + custom form fields + marker."""
+    return SHEET_STANDARD_HEADERS + _collect_custom_fields(leads) + ["CRM Marker"]
+
+
+def _headers_for_lead(lead: Lead) -> list:
+    return build_sheet_headers([lead])
+
+
+def _read_sheet_headers(worksheet) -> list | None:
+    row = worksheet.row_values(1)
+    if row and "CRM Marker" in row:
+        return row
+    return None
+
+
+def _lead_header_value(lead: Lead, header: str) -> str:
+    """Map a header name to the lead's value for that column."""
+    key = (header or "").strip().lower()
+    if key == "date":
+        return lead.created_at.strftime("%Y-%m-%d %H:%M:%S") if lead.created_at else ""
+    if key == "name":
+        return lead.name or ""
+    if key == "email":
+        return lead.email or ""
+    if key == "phone":
+        return lead.phone or ""
+    if key == "campaign":
+        return lead.campaign_name or ""
+    if key == "form":
+        return lead.form_name or ""
+    raw = lead.raw_data or {}
+    field_data = raw.get("field_data") if isinstance(raw, dict) else None
+    if isinstance(field_data, list):
+        for field in field_data:
+            if (field.get("name") or "").strip().lower() == key:
+                values = field.get("values") or []
+                if values:
+                    return str(values[0])
+    return ""
+
+
+def populate_google_sheet(sheet_id: str, sheet_name: str, headers: list, leads: list) -> int:
+    """Clear the worksheet, write the header row, then write every lead aligned to it."""
+    client = _authorized_client()
+    worksheet = client.open_by_key(sheet_id).worksheet(sheet_name)
+    worksheet.clear()
+    rows = [headers] + [[_lead_header_value(lead, h) for h in headers] for lead in leads]
+    if rows:
+        worksheet.update("A1", rows, value_input_option="USER_ENTERED")
+    return max(0, len(rows) - 1)
+
+
 def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
-    """Append a new lead row to the connected Google Sheet.
+    """Append a new lead row to the connected Google Sheet, aligned to its headers.
 
     Requires GOOGLE_SHEETS_CREDENTIALS_FILE to point to a valid service-account
     JSON key file downloaded from the Google Cloud Console.
     """
-    creds_file = settings.google_sheets_credentials_file
-    if not creds_file:
+    if not settings.google_sheets_credentials_file:
         logger.info(
             "Google Sheets sync skipped — GOOGLE_SHEETS_CREDENTIALS_FILE not configured. "
             "Lead: %s (sheet_id=%s)", lead.name, sheet_id
@@ -49,26 +135,19 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
         raise RuntimeError("Google Sheets credentials are not configured")
 
     try:
-        creds = Credentials.from_service_account_file(
-            creds_file,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"],
-        )
-        client = gspread.authorize(creds)
-        client.set_timeout(30)
-        sheet = client.open_by_key(sheet_id).worksheet(sheet_name)
+        client = _authorized_client()
+        worksheet = client.open_by_key(sheet_id).worksheet(sheet_name)
+        headers = _read_sheet_headers(worksheet)
+        if headers is None:
+            headers = _headers_for_lead(lead)
+            worksheet.clear()
+            worksheet.append_row(headers)
+        marker_col = headers.index("CRM Marker") + 1
         marker = f'crm:{lead.org_id}:{lead.id}'
-        if marker in sheet.col_values(7):
+        if marker_col and marker in worksheet.col_values(marker_col):
             return
-        row = [
-            lead.created_at.strftime("%Y-%m-%d %H:%M:%S") if lead.created_at else "",
-            lead.name or "",
-            lead.email or "",
-            lead.phone or "",
-            lead.campaign_name or "",
-            lead.form_name or "",
-            marker,
-        ]
-        sheet.append_row(row)
+        row = [_lead_header_value(lead, h) for h in headers]
+        worksheet.append_row(row)
         logger.info("Synced lead '%s' to Google Sheet %s/%s", lead.name, sheet_id, sheet_name)
     except Exception:
         raise RuntimeError("Google Sheets sync failed; check credentials, sheet sharing and worksheet name") from None

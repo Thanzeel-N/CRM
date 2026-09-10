@@ -1,3 +1,4 @@
+import logging
 import re
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from google.oauth2.service_account import Credentials
 from app.database import get_db
 from app.models import User, GoogleSheetConnection
 from app.services.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/integrations/google-sheets", tags=["google_sheets"])
 
@@ -90,9 +93,11 @@ async def connect_google_sheet(
     db.commit()
     db.refresh(conn)
 
-    # Backfill existing leads that match this connection's campaign
+    # Backfill existing leads into the newly connected sheet, aligned under headers
+    # built from standard columns + the campaign form question names.
+    import asyncio
     from app.models import Lead
-    from app.routers.webhooks import sync_lead_to_google_sheets
+    from app.routers.webhooks import build_sheet_headers, populate_google_sheet, sync_lead_to_google_sheets
 
     query = db.query(Lead).filter(Lead.org_id == current_user.org_id)
     if payload.campaign_id:
@@ -100,12 +105,27 @@ async def connect_google_sheet(
     existing_leads = query.order_by(Lead.id).all()
 
     backfilled = 0
-    for lead in existing_leads:
-        sync_lead_to_google_sheets(db, lead, commit=False)
-        backfilled += 1
-    db.commit()
+    backfill_error = None
+    if existing_leads:
+        headers = build_sheet_headers(existing_leads)
+        try:
+            backfilled = await asyncio.to_thread(
+                populate_google_sheet, conn.spreadsheet_id, conn.sheet_name, headers, existing_leads
+            )
+        except Exception as e:
+            backfill_error = str(e)
+            logger.warning("Google Sheets backfill failed for connection %s: %s", conn.id, e)
+            for lead in existing_leads:
+                sync_lead_to_google_sheets(db, lead, commit=False)
+            db.commit()
 
-    return {"status": "success", "message": "Google Sheet connected successfully", "id": conn.id, "backfilled_leads": backfilled}
+    return {
+        "status": "success",
+        "message": "Google Sheet connected successfully",
+        "id": conn.id,
+        "backfilled_leads": backfilled,
+        "backfill_error": backfill_error,
+    }
 
 @router.get("/connections", response_model=List[GoogleSheetConnectionOut])
 async def list_google_sheet_connections(
