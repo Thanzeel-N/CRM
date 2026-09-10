@@ -372,23 +372,31 @@ async function loadStats() {
       });
     } catch (e) { }
     // form filter
-    try {
-      const forms = await api('/leads/forms') || [];
-      const formSel = document.getElementById('formFilterSelect');
-      const currentForm = formSel.value;
-      while (formSel.options.length > 1) formSel.remove(1);
-      forms.forEach(f => {
-        const opt = document.createElement('option');
-        const fVal = typeof f === 'object' ? (f.name || f.id) : f;
-        const fName = typeof f === 'object' ? (f.name || f.id) : f;
-        opt.value = fVal;
-        opt.textContent = fName;
-        if (fVal === currentForm) opt.selected = true;
-        formSel.appendChild(opt);
-      });
-    } catch (e) { }
-
+    refreshFormFilter('');
   } catch (err) { }
+}
+
+// Reload the form filter dropdown. When a campaign is selected, only show the
+// forms that belong to that campaign; otherwise show forms of active campaigns.
+async function refreshFormFilter(campaignValue) {
+  try {
+    const url = campaignValue
+      ? `/leads/forms?campaign_id=${encodeURIComponent(campaignValue)}`
+      : '/leads/forms';
+    const forms = await api(url) || [];
+    const formSel = document.getElementById('formFilterSelect');
+    const currentForm = formSel.value;
+    while (formSel.options.length > 1) formSel.remove(1);
+    forms.forEach(f => {
+      const opt = document.createElement('option');
+      const fVal = typeof f === 'object' ? (f.name || f.id) : f;
+      const fName = typeof f === 'object' ? (f.name || f.id) : f;
+      opt.value = fVal;
+      opt.textContent = fName;
+      if (fVal === currentForm) opt.selected = true;
+      formSel.appendChild(opt);
+    });
+  } catch (e) { }
 }
 
 function renderKanban(leads) {
@@ -696,7 +704,10 @@ document.getElementById('searchInput').addEventListener('input', () => {
 });
 document.getElementById('campaignFilterSelect').addEventListener('change', () => {
   state.currentPage = 0;
-  loadLeads();
+  const campSel = document.getElementById('campaignFilterSelect');
+  const formSel = document.getElementById('formFilterSelect');
+  formSel.value = '';
+  refreshFormFilter(campSel.value).then(() => loadLeads());
 });
 document.getElementById('formFilterSelect').addEventListener('change', () => {
   state.currentPage = 0;

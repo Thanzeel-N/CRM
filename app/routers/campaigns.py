@@ -67,7 +67,8 @@ def _require_admin(current_user: User):
 
 def _campaign_out(c: Campaign, db: Session) -> CampaignOut:
     from app.models import Lead
-    count = db.query(Lead).filter(
+    # Prefer Meta's live lifetime lead count once synced; fall back to local DB.
+    lead_count = c.meta_lead_count if c.meta_lead_count is not None else db.query(Lead).filter(
         Lead.org_id == c.org_id,
         (Lead.campaign_id == c.id) | (Lead.campaign_name == c.name)
     ).count()
@@ -95,7 +96,7 @@ def _campaign_out(c: Campaign, db: Session) -> CampaignOut:
         assigned_user_name=c.assigned_user.name if c.assigned_user else None,
         is_active=c.is_active,
         meta_status=c.meta_status,
-        lead_count=count,
+        lead_count=lead_count,
         google_sheets=sheets
     )
 

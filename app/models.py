@@ -103,6 +103,8 @@ class Campaign(Base):
     meta_ad_account_id = Column(String(255), nullable=True)       # Meta Ad Account ID
     meta_campaign_id = Column(String(255), nullable=True, index=True)  # Meta Ad Campaign ID
     meta_status = Column(String(50), nullable=True)                   # Live Meta status: ACTIVE, PAUSED, DELETED, ARCHIVED, etc.
+    meta_lead_count = Column(Integer, nullable=True)                  # Lifetime lead count reported by Meta (from leadgen forms)
+    meta_form_ids = Column(JSON, nullable=True)                       # Meta Lead Form IDs feeding this campaign
     description = Column(Text, nullable=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Assigned agent
     is_active = Column(Boolean, default=True, nullable=False)

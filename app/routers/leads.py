@@ -52,7 +52,8 @@ def _base_lead_query(db: Session, current_user: User):
 @router.get("/forms")
 async def list_lead_forms(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    campaign_id: Optional[str] = Query(None, description="Restrict to forms belonging to this campaign (id or name)"),
 ):
     """Return a list of unique form details/names associated with this org's leads and connections."""
     if current_user.role == UserRole.agent:
@@ -188,6 +189,41 @@ async def list_lead_forms(
             seen.add(fname)
             result.append({"id": fid, "name": fname})
 
+    # Filter by campaign: show only the forms feeding the selected campaign.
+    if campaign_id:
+        from app.models import Campaign
+        camp = None
+        if campaign_id.isdigit():
+            camp = db.query(Campaign).filter(
+                Campaign.org_id == current_user.org_id,
+                Campaign.id == int(campaign_id)
+            ).first()
+        if camp is None:
+            camp = db.query(Campaign).filter(
+                Campaign.org_id == current_user.org_id,
+                Campaign.name == campaign_id
+            ).first()
+        if not camp:
+            return []
+        form_ids = [str(f) for f in (camp.meta_form_ids or [])]
+        return [{"id": fid, "name": form_map.get(fid) or fid} for fid in form_ids]
+
+    # Hide forms that belong to deactivated campaigns from the default list.
+    from app.models import Campaign
+    inactive_ids, active_ids = set(), set()
+    for c in db.query(Campaign).filter(Campaign.org_id == current_user.org_id).all():
+        for fid in (c.meta_form_ids or []):
+            key = str(fid)
+            (active_ids if c.is_active else inactive_ids).add(key)
+            # Form ids may be stored by name after backfill; track both.
+            name_key = form_map.get(key) or key
+            (active_ids if c.is_active else inactive_ids).add(name_key)
+    if inactive_ids:
+        result = [
+            f for f in result
+            if not (str(f["id"]) in inactive_ids and str(f["id"]) not in active_ids)
+        ]
+
     return result
 
 @router.get("/campaigns")
@@ -203,25 +239,26 @@ def list_lead_campaigns(
         Lead.campaign_name != None,
         Lead.campaign_name != ""
     ).distinct().all()
-    
+
+    # Only surface active campaigns (or lead names not tied to any archived row).
+    org_campaigns = db.query(Campaign).filter(Campaign.org_id == current_user.org_id).all()
+    inactive_names = {c.name for c in org_campaigns if not c.is_active}
+
     result = []
     seen = set()
     for c in campaigns_db:
         val = c[0]
         if val and val not in seen:
             seen.add(val)
+            if val in inactive_names:
+                continue  # deactivated campaign -> hide from the active list
             result.append({"id": val, "name": val})
-            
-    manual_campaigns = db.query(Campaign).filter(
-        Campaign.org_id == current_user.org_id,
-        Campaign.is_active == True
-    ).all()
-    
-    for mc in manual_campaigns:
-        if mc.name not in seen:
+
+    for mc in org_campaigns:
+        if mc.is_active and mc.name not in seen:
             seen.add(mc.name)
             result.append({"id": mc.id, "name": mc.name})
-            
+
     return result
 
 @router.get("", response_model=List[LeadOut])

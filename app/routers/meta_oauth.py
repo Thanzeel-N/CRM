@@ -28,14 +28,17 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
 
     Page tokens do NOT have ``ads_read`` permission so we cannot enumerate ad
     campaigns directly.  Instead we:
-      1. Fetch every ``leadgen_form`` on every connected page (id, name, status).
+      1. Fetch every ``leadgen_form`` on every connected page (id, name, status,
+         lead_count).
       2. Read a sample of leads per form to learn which Meta campaign (by name
          & ID) each form belongs to.
       3. Aggregate form statuses per campaign: if ANY form is ACTIVE the
          campaign is ACTIVE; otherwise it mirrors the first form's status.
       4. Create any discovered campaign that isn't in the CRM yet (so running
-         campaigns are never missing), and set ``is_active``/``meta_status`` to
-         match the live state (so stopped campaigns stop showing as active).
+         campaigns are never missing), set ``is_active``/``meta_status`` to
+         match the live state, and record the campaign's Meta lead count and
+         form IDs (``meta_lead_count`` / ``meta_form_ids``) so the displayed
+         lead count matches Meta.
     Campaigns we cannot map (e.g. forms without leads) are checked against the
     ad-campaign endpoint as a best effort when we have their ID.
     """
@@ -53,7 +56,7 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
     created = 0
 
     try:
-        # campaign name -> {"meta_campaign_id": str, "form_status_by_form": {form_id: status}}
+        # campaign name -> {meta_campaign_id, form_status_by_form, forms, lead_count}
         campaign_info = {}
 
         for conn in conns:
@@ -62,7 +65,7 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
 
             # Step 1: fetch ALL leadgen forms from this page
             url = f"{FB_API_BASE}/{page_id}/leadgen_forms"
-            params = {"access_token": token, "fields": "id,name,status", "limit": 100}
+            params = {"access_token": token, "fields": "id,name,status,lead_count", "limit": 100}
             all_forms = []
             while url:
                 try:
@@ -84,7 +87,8 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
                 updated_forms = [
                     {"id": str(f["id"]),
                      "name": f.get("name") or f"Form #{f['id']}",
-                     "status": f.get("status")}
+                     "status": f.get("status"),
+                     "lead_count": f.get("lead_count")}
                     for f in all_forms
                 ]
                 if conn.connected_forms != updated_forms:
@@ -94,6 +98,7 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
             for form in all_forms:
                 form_id = str(form.get("id"))
                 form_status = (form.get("status") or "").upper()
+                form_leads = int(form.get("lead_count") or 0)
 
                 lead_url = f"{FB_API_BASE}/{form_id}/leads"
                 lead_params = {
@@ -101,6 +106,7 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
                     "fields": "id,campaign_id,campaign_name",
                     "limit": 50,
                 }
+                camps_in_form = []
                 try:
                     resp = await _owned_client.get(lead_url, params=lead_params)
                     lead_data = resp.json()
@@ -110,8 +116,10 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
                         camp_name = (lead.get("campaign_name") or "").strip()
                         if not camp_name:
                             continue
+                        if camp_name not in camps_in_form:
+                            camps_in_form.append(camp_name)
                         info = campaign_info.setdefault(
-                            camp_name, {"meta_campaign_id": "", "form_status_by_form": {}}
+                            camp_name, {"meta_campaign_id": "", "form_status_by_form": {}, "forms": [], "lead_count": 0}
                         )
                         camp_id = str(lead.get("campaign_id") or "")
                         if camp_id and not info["meta_campaign_id"]:
@@ -119,6 +127,14 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
                         info["form_status_by_form"][form_id] = form_status
                 except Exception:
                     continue
+
+                # Attribute the form (and its full Meta lead count) to the first
+                # campaign discovered through its leads so counts aren't doubled.
+                if camps_in_form:
+                    owner = campaign_info[camps_in_form[0]]
+                    if form_id not in owner["forms"]:
+                        owner["forms"].append(form_id)
+                        owner["lead_count"] += form_leads
 
         existing = {c.name: c for c in db.query(Campaign).filter(Campaign.org_id == org_id).all()}
 
@@ -129,6 +145,8 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
             overall = "ACTIVE" if has_active else (statuses[0] if statuses else None)
             new_active = (overall == "ACTIVE") if overall else True
 
+            meta_form_ids = sorted(info["forms"]) or None
+
             camp = existing.get(camp_name)
             if camp is None:
                 camp = Campaign(
@@ -136,6 +154,8 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
                     name=camp_name,
                     meta_campaign_id=info["meta_campaign_id"] or None,
                     meta_status=overall,
+                    meta_lead_count=info["lead_count"] or None,
+                    meta_form_ids=meta_form_ids,
                     is_active=new_active,
                     description="Auto-created from Meta Lead Ads",
                 )
@@ -151,6 +171,12 @@ async def sync_campaign_statuses(db: Session, org_id: int, client: httpx.AsyncCl
                 changed = True
             if overall and camp.meta_status != overall:
                 camp.meta_status = overall
+                changed = True
+            if camp.meta_lead_count != (info["lead_count"] or None):
+                camp.meta_lead_count = info["lead_count"] or None
+                changed = True
+            if camp.meta_form_ids != meta_form_ids:
+                camp.meta_form_ids = meta_form_ids
                 changed = True
             if camp.is_active != new_active:
                 camp.is_active = new_active

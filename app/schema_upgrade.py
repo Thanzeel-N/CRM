@@ -25,3 +25,7 @@ def upgrade_workflow(connection):
             connection.execute(text('ALTER TABLE campaigns ADD COLUMN meta_campaign_id VARCHAR(255)'))
         if 'meta_status' not in campaign_columns:
             connection.execute(text('ALTER TABLE campaigns ADD COLUMN meta_status VARCHAR(50)'))
+        if 'meta_lead_count' not in campaign_columns:
+            connection.execute(text('ALTER TABLE campaigns ADD COLUMN meta_lead_count INTEGER'))
+        if 'meta_form_ids' not in campaign_columns:
+            connection.execute(text("ALTER TABLE campaigns ADD COLUMN meta_form_ids JSON"))
