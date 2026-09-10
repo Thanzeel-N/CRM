@@ -148,20 +148,28 @@ def list_campaigns(
 
     # Imported leads originally stored only a campaign name. Link them so
     # campaign assignment also grants the intended agent access to those leads.
-    for campaign in db.query(Campaign).filter(Campaign.org_id == current_user.org_id).all():
-        db.query(Lead).filter(Lead.org_id == current_user.org_id,
-                              Lead.campaign_id.is_(None), Lead.campaign_name == campaign.name).update(
-            {Lead.campaign_id: campaign.id}, synchronize_session=False)
-        # Backfill the Meta campaign ID so live Meta status can be synced later.
-        if campaign.meta_campaign_id is None:
-            row = db.query(Lead.raw_data).filter(
-                Lead.org_id == current_user.org_id,
-                Lead.campaign_name == campaign.name,
-                Lead.raw_data != None,
-            ).first()
-            if row and isinstance(row[0], dict) and row[0].get("campaign_id"):
-                campaign.meta_campaign_id = str(row[0]["campaign_id"])
-    db.commit()
+    # Wrapped in try/except: concurrent workers can hit InnoDB lock-wait timeouts
+    # (error 1205) on this UPDATE. We roll back and log rather than crash.
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    try:
+        for campaign in db.query(Campaign).filter(Campaign.org_id == current_user.org_id).all():
+            db.query(Lead).filter(Lead.org_id == current_user.org_id,
+                                  Lead.campaign_id.is_(None), Lead.campaign_name == campaign.name).update(
+                {Lead.campaign_id: campaign.id}, synchronize_session=False)
+            # Backfill the Meta campaign ID so live Meta status can be synced later.
+            if campaign.meta_campaign_id is None:
+                row = db.query(Lead.raw_data).filter(
+                    Lead.org_id == current_user.org_id,
+                    Lead.campaign_name == campaign.name,
+                    Lead.raw_data != None,
+                ).first()
+                if row and isinstance(row[0], dict) and row[0].get("campaign_id"):
+                    campaign.meta_campaign_id = str(row[0]["campaign_id"])
+        db.commit()
+    except Exception as _exc:
+        db.rollback()
+        _log.warning("list_campaigns: backfill skipped due to lock contention — %s", _exc)
 
     # 2. Query campaigns for current user
     q = db.query(Campaign).filter(Campaign.org_id == current_user.org_id)

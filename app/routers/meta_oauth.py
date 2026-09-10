@@ -308,7 +308,7 @@ async def exchange_code(
     if settings.meta_app_id == "local_dev_meta_app_id":
         return {"fb_session_token": create_fb_session_token("mock_user_token")}
         
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(url, params=params)
         data = resp.json()
         if "error" in data:
@@ -355,7 +355,7 @@ async def get_pages(
     url = f"{FB_API_BASE}/me/accounts"
     params = {"access_token": user_access_token, "fields": "id,name,access_token,tasks,category"}
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(url, params=params)
         data = resp.json()
         if "error" in data:
@@ -394,7 +394,7 @@ async def get_page_forms(
     params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
     
     page_access_token = None
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(url_accounts, params=params_acc)
         data = resp.json()
         for p in data.get("data", []):
@@ -409,7 +409,7 @@ async def get_page_forms(
     url_forms = f"{FB_API_BASE}/{page_id}/leadgen_forms"
     params_forms = {"access_token": page_access_token, "fields": "id,name,status"}
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(url_forms, params=params_forms)
         try:
             data = resp.json()
@@ -460,156 +460,166 @@ async def connect_page(
     if settings.meta_app_id == "local_dev_meta_app_id":
         page_access_token = "mock_page_token"
     else:
-        async with httpx.AsyncClient() as client:
-            # 0. Verify permissions
-            url_perms = f"{FB_API_BASE}/me/permissions"
-            params_perms = {"access_token": user_access_token}
-            resp_perms = await client.get(url_perms, params=params_perms)
-            perms_data = resp_perms.json()
-            
-            if "error" in perms_data:
-                raise HTTPException(status_code=400, detail="Failed to verify permissions")
-                
-            granted_scopes = [p["permission"] for p in perms_data.get("data", []) if p["status"] == "granted"]
-            required_scopes = ["pages_show_list", "pages_read_engagement", "pages_manage_metadata", "leads_retrieval"]
-            missing_scopes = [s for s in required_scopes if s not in granted_scopes]
-            
-            if missing_scopes:
-                logger.error(f"Connect page verification failed. Missing required Facebook permissions: {missing_scopes}")
-                raise HTTPException(
-                    status_code=403, 
-                    detail=f"Missing required Facebook permissions: {', '.join(missing_scopes)}"
-                )
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                # 0. Verify permissions
+                url_perms = f"{FB_API_BASE}/me/permissions"
+                params_perms = {"access_token": user_access_token}
+                resp_perms = await client.get(url_perms, params=params_perms)
+                perms_data = resp_perms.json()
 
-            # 1. Get Page Access Token
-            url_accounts = f"{FB_API_BASE}/me/accounts"
-            params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
-            
-            page_access_token = None
-            resp = await client.get(url_accounts, params=params_acc)
-            data = resp.json()
-            for p in data.get("data", []):
-                if p["id"] == page_id:
-                    page_access_token = p["access_token"]
-                    break
+                if "error" in perms_data:
+                    raise HTTPException(status_code=400, detail="Failed to verify permissions")
                 
-            if not page_access_token:
-                raise HTTPException(status_code=403, detail="Could not retrieve Page Access Token")
+                granted_scopes = [p["permission"] for p in perms_data.get("data", []) if p["status"] == "granted"]
+                required_scopes = ["pages_show_list", "pages_read_engagement", "pages_manage_metadata", "leads_retrieval"]
+                missing_scopes = [s for s in required_scopes if s not in granted_scopes]
+                
+                if missing_scopes:
+                    logger.error(f"Connect page verification failed. Missing required Facebook permissions: {missing_scopes}")
+                    raise HTTPException(
+                        status_code=403, 
+                        detail=f"Missing required Facebook permissions: {', '.join(missing_scopes)}"
+                    )
+
+                # 1. Get Page Access Token
+                url_accounts = f"{FB_API_BASE}/me/accounts"
+                params_acc = {"access_token": user_access_token, "fields": "id,access_token"}
+                
+                page_access_token = None
+                resp = await client.get(url_accounts, params=params_acc)
+                data = resp.json()
+                for p in data.get("data", []):
+                    if p["id"] == page_id:
+                        page_access_token = p["access_token"]
+                        break
                     
-            # 2. Subscribe webhook
-            url_sub = f"{FB_API_BASE}/{page_id}/subscribed_apps"
-            params_sub = {
-                "access_token": page_access_token,
-                "subscribed_fields": "leadgen"
-            }
-            resp_sub = await client.post(url_sub, params=params_sub)
-            sub_data = resp_sub.json()
-            
-            if "error" in sub_data:
-                err_msg = sub_data["error"].get("message", "Unknown error subscribing webhook")
-                logger.error(f"Webhook subscription failed for page {page_id}: {err_msg}")
-                raise HTTPException(status_code=400, detail=f"Webhook subscription failed: {err_msg}")
-            
-            forms_meta = []
-            clean_form_ids = []
-            form_map = {}
-            for item in forms:
-                if isinstance(item, dict):
-                    fid = str(item.get("id"))
-                    fname = item.get("name") or f"Form #{fid}"
-                    fstatus = item.get("status")
-                else:
-                    fid = str(item)
-                    fname = f"Form #{fid}"
-                    fstatus = None
-                clean_form_ids.append(fid)
-                forms_meta.append({"id": fid, "name": fname, "status": fstatus})
-                form_map[fid] = fname
-
-            # 3. Historical Lead Sync
-            seen_lead_ids = set()
-            for form_id in clean_form_ids:
-                url_leads = f"{FB_API_BASE}/{form_id}/leads"
-                params_leads = {
+                if not page_access_token:
+                    raise HTTPException(status_code=403, detail="Could not retrieve Page Access Token")
+                        
+                # 2. Subscribe webhook
+                url_sub = f"{FB_API_BASE}/{page_id}/subscribed_apps"
+                params_sub = {
                     "access_token": page_access_token,
-                    "fields": "id,created_time,field_data,campaign_id,campaign_name,form_id"
+                    "subscribed_fields": "leadgen"
                 }
+                resp_sub = await client.post(url_sub, params=params_sub)
+                sub_data = resp_sub.json()
                 
-                try:
-                    form_success = True
-                    while url_leads:
-                        resp_leads = await client.get(url_leads, params=params_leads)
-                        leads_data = resp_leads.json()
-                        
-                        if "error" in leads_data:
-                            logger.error(f"Error syncing leads for form {form_id}: {leads_data['error']}")
-                            form_success = False
-                            break
-                            
-                        # Process leads
-                        for l in leads_data.get("data", []):
-                            fb_lead_id = l.get("id")
-                            if not fb_lead_id or fb_lead_id in seen_lead_ids:
-                                sync_results["duplicates_skipped"] += 1
-                                continue
-                                
-                            existing = db.query(Lead).filter(
-                                Lead.fb_lead_id == fb_lead_id,
-                                Lead.org_id == current_user.org_id
-                            ).first()
-                            
-                            if existing:
-                                seen_lead_ids.add(fb_lead_id)
-                                sync_results["duplicates_skipped"] += 1
-                                continue
-                                
-                            fields = parse_field_data(l.get("field_data", []))
-                            
-                            created_at_val = None
-                            if "created_time" in l:
-                                try:
-                                    created_at_val = dateutil.parser.parse(l["created_time"])
-                                except Exception:
-                                    pass
-                            
-                            target_form_id = str(l.get("form_id") or form_id)
-                            resolved_form_name = form_map.get(target_form_id, f"Form #{target_form_id}")
-
-                            new_lead = Lead(
-                                org_id=current_user.org_id,
-                                fb_lead_id=fb_lead_id,
-                                name=extract_field(fields, *NAME_FIELD_NAMES),
-                                email=extract_field(fields, *EMAIL_FIELD_NAMES),
-                                phone=extract_field(fields, *PHONE_FIELD_NAMES),
-                                campaign_name=l.get("campaign_name"),
-                                form_name=resolved_form_name,
-                                raw_data={**l, "form_id": target_form_id},
-                                created_at=created_at_val
-                            )
-                            from app.services.lead_ingestion import insert_lead_once
-                            new_lead, inserted = insert_lead_once(db, new_lead)
-                            if not inserted:
-                                seen_lead_ids.add(fb_lead_id)
-                                sync_results["duplicates_skipped"] += 1
-                                continue
-                            from app.routers.webhooks import sync_lead_to_google_sheets
-                            sync_lead_to_google_sheets(db, new_lead, commit=False)
-                            seen_lead_ids.add(fb_lead_id)
-                            sync_results["leads_imported"] += 1
-                            
-                        # Pagination
-                        paging = leads_data.get("paging", {})
-                        url_leads = paging.get("next")
-                        params_leads = None
-                        
-                    if form_success:
-                        sync_results["forms_synced"] += 1
+                if "error" in sub_data:
+                    err_msg = sub_data["error"].get("message", "Unknown error subscribing webhook")
+                    logger.error(f"Webhook subscription failed for page {page_id}: {err_msg}")
+                    raise HTTPException(status_code=400, detail=f"Webhook subscription failed: {err_msg}")
+                
+                forms_meta = []
+                clean_form_ids = []
+                form_map = {}
+                for item in forms:
+                    if isinstance(item, dict):
+                        fid = str(item.get("id"))
+                        fname = item.get("name") or f"Form #{fid}"
+                        fstatus = item.get("status")
                     else:
+                        fid = str(item)
+                        fname = f"Form #{fid}"
+                        fstatus = None
+                    clean_form_ids.append(fid)
+                    forms_meta.append({"id": fid, "name": fname, "status": fstatus})
+                    form_map[fid] = fname
+
+                # 3. Historical Lead Sync
+                seen_lead_ids = set()
+                for form_id in clean_form_ids:
+                    url_leads = f"{FB_API_BASE}/{form_id}/leads"
+                    params_leads = {
+                        "access_token": page_access_token,
+                        "fields": "id,created_time,field_data,campaign_id,campaign_name,form_id"
+                    }
+                    
+                    try:
+                        form_success = True
+                        while url_leads:
+                            resp_leads = await client.get(url_leads, params=params_leads)
+                            leads_data = resp_leads.json()
+                            
+                            if "error" in leads_data:
+                                logger.error(f"Error syncing leads for form {form_id}: {leads_data['error']}")
+                                form_success = False
+                                break
+                                
+                            # Process leads
+                            for l in leads_data.get("data", []):
+                                fb_lead_id = l.get("id")
+                                if not fb_lead_id or fb_lead_id in seen_lead_ids:
+                                    sync_results["duplicates_skipped"] += 1
+                                    continue
+                                    
+                                existing = db.query(Lead).filter(
+                                    Lead.fb_lead_id == fb_lead_id,
+                                    Lead.org_id == current_user.org_id
+                                ).first()
+                                
+                                if existing:
+                                    seen_lead_ids.add(fb_lead_id)
+                                    sync_results["duplicates_skipped"] += 1
+                                    continue
+                                    
+                                fields = parse_field_data(l.get("field_data", []))
+                                
+                                created_at_val = None
+                                if "created_time" in l:
+                                    try:
+                                        created_at_val = dateutil.parser.parse(l["created_time"])
+                                    except Exception:
+                                        pass
+                                
+                                target_form_id = str(l.get("form_id") or form_id)
+                                resolved_form_name = form_map.get(target_form_id, f"Form #{target_form_id}")
+
+                                new_lead = Lead(
+                                    org_id=current_user.org_id,
+                                    fb_lead_id=fb_lead_id,
+                                    name=extract_field(fields, *NAME_FIELD_NAMES),
+                                    email=extract_field(fields, *EMAIL_FIELD_NAMES),
+                                    phone=extract_field(fields, *PHONE_FIELD_NAMES),
+                                    campaign_name=l.get("campaign_name"),
+                                    form_name=resolved_form_name,
+                                    raw_data={**l, "form_id": target_form_id},
+                                    created_at=created_at_val
+                                )
+                                from app.services.lead_ingestion import insert_lead_once
+                                new_lead, inserted = insert_lead_once(db, new_lead)
+                                if not inserted:
+                                    seen_lead_ids.add(fb_lead_id)
+                                    sync_results["duplicates_skipped"] += 1
+                                    continue
+                                from app.routers.webhooks import sync_lead_to_google_sheets
+                                sync_lead_to_google_sheets(db, new_lead, commit=False)
+                                seen_lead_ids.add(fb_lead_id)
+                                sync_results["leads_imported"] += 1
+                                
+                            # Pagination
+                            paging = leads_data.get("paging", {})
+                            url_leads = paging.get("next")
+                            params_leads = None
+                            
+                        if form_success:
+                            sync_results["forms_synced"] += 1
+                        else:
+                            sync_results["failed_forms"] += 1
+                            
+                    except Exception as e:
+                        logger.exception(f"Exception syncing form {form_id}: {e}")
                         sync_results["failed_forms"] += 1
-                        
-                except Exception as e:
-                    logger.exception(f"Exception syncing form {form_id}: {e}")
-                    sync_results["failed_forms"] += 1
+                
+        except HTTPException:
+            raise
+        except httpx.TimeoutException as exc:
+            logger.error("connect_page: Facebook API request timed out: %s", exc)
+            raise HTTPException(status_code=502, detail="Facebook API request timed out. Please try again.")
+        except httpx.RequestError as exc:
+            logger.error("connect_page: Facebook API network error: %s", exc)
+            raise HTTPException(status_code=502, detail="Could not reach Facebook API. Please try again.")
             
     # 4. Save to DB
     conn = db.query(MetaPageConnection).filter(
@@ -691,7 +701,7 @@ async def disconnect_page(
     if settings.meta_app_id != "local_dev_meta_app_id" and conn.access_token:
         url_sub = f"{FB_API_BASE}/{conn.page_id}/subscribed_apps"
         params = {"access_token": conn.access_token}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             await client.delete(url_sub, params=params)
 
     db.delete(conn)
@@ -721,7 +731,7 @@ async def sync_facebook_leads(
         "failed_forms": 0
     }
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         for conn in conns:
             page_id = conn.page_id
             page_access_token = conn.access_token
