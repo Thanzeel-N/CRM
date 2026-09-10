@@ -3,10 +3,19 @@ from sqlalchemy import inspect, text
 
 
 def upgrade_workflow(connection):
+    tables = set(inspect(connection).get_table_names())
+    if 'organizations' in tables:
+        columns = {c['name'] for c in inspect(connection).get_columns('organizations')}
+        if 'timezone' not in columns:
+            connection.execute(text("ALTER TABLE organizations ADD COLUMN timezone VARCHAR(100) NOT NULL DEFAULT 'Asia/Kolkata'"))
     if 'google_sheet_connections' in inspect(connection).get_table_names():
         sheet_columns = {c['name'] for c in inspect(connection).get_columns('google_sheet_connections')}
         if 'campaign_id' not in sheet_columns:
             connection.execute(text('ALTER TABLE google_sheet_connections ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)'))
+        if 'form_id' not in sheet_columns:
+            connection.execute(text('ALTER TABLE google_sheet_connections ADD COLUMN form_id VARCHAR(255)'))
+    if 'leads' not in tables:
+        return
     columns = {c['name'] for c in inspect(connection).get_columns('leads')}
     for name, definition in {
         'owner_id': 'INTEGER REFERENCES users(id)',

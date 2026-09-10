@@ -64,15 +64,22 @@ app.add_middleware(
 )
 
 # ── Database ───────────────────────────────────────────────────────────────────
-from app.schema_upgrade import upgrade_workflow
-with engine.begin() as connection:
-    upgrade_workflow(connection)
-
 if not is_production:
+    from app.schema_upgrade import upgrade_workflow
+    with engine.begin() as connection:
+        upgrade_workflow(connection)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         from app.services.lead_deduplication import repair_and_enforce_unique_sources
         repair_and_enforce_unique_sources(connection)
+else:
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    required = {'organizations': {'timezone'}, 'google_sheet_connections': {'form_id'},
+                'sheet_delivery_locks': {'destination'}, 'leads': {'owner_id', 'follow_up_at'}}
+    for table, columns in required.items():
+        if not inspector.has_table(table) or not columns.issubset({c['name'] for c in inspector.get_columns(table)}):
+            raise RuntimeError('Database migrations are required. Run alembic upgrade head before starting the application.')
 
 
 # ── Global exception handler ───────────────────────────────────────────────────

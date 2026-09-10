@@ -3,6 +3,8 @@ import time
 import logging
 import random
 from datetime import datetime, date, timezone
+from zoneinfo import ZoneInfo
+from app.services.timezones import day_bounds, local_datetime
 from typing import Optional, List
 
 import pandas as pd
@@ -295,18 +297,17 @@ def list_leads(
             (Lead.form_name.ilike(p))
         )
     if date_from:
-        # Validate format but use string for safer SQLite comparison
         try:
-            datetime.strptime(date_from, "%Y-%m-%d")
-            query = query.filter(func.date(Lead.created_at) >= date_from)
+            start, _ = day_bounds(datetime.strptime(date_from, "%Y-%m-%d").date(), current_user.organization.timezone)
+            query = query.filter(Lead.created_at >= start)
         except ValueError:
-            pass
+            raise HTTPException(400, 'Invalid start date; use YYYY-MM-DD')
     if date_to:
         try:
-            datetime.strptime(date_to, "%Y-%m-%d")
-            query = query.filter(func.date(Lead.created_at) <= date_to)
+            _, end = day_bounds(datetime.strptime(date_to, "%Y-%m-%d").date(), current_user.organization.timezone)
+            query = query.filter(Lead.created_at < end)
         except ValueError:
-            pass
+            raise HTTPException(400, 'Invalid end date; use YYYY-MM-DD')
 
     total = query.count()
     leads = query.order_by(Lead.created_at.desc(), Lead.id.desc()).offset(offset).limit(limit).all()
@@ -337,12 +338,11 @@ def get_lead_stats(
 
     conversion_rate = round((converted_count / total * 100), 1) if total > 0 else 0.0
 
-    from datetime import timedelta
-    today_utc = datetime.now(timezone.utc).date()
-    tomorrow_utc = today_utc + timedelta(days=1)
-    new_today = _base_lead_query(db, current_user).filter(
-        Lead.created_at >= datetime.combine(today_utc, datetime.min.time()).replace(tzinfo=timezone.utc),
-        Lead.created_at <  datetime.combine(tomorrow_utc, datetime.min.time()).replace(tzinfo=timezone.utc),
+    region = current_user.organization.timezone
+    start, end = day_bounds(datetime.now(ZoneInfo(region)).date(), region)
+    new_today = base.filter(
+        Lead.created_at >= start,
+        Lead.created_at < end,
     ).count()
 
     campaign_rows = _base_lead_query(db, current_user).with_entities(
@@ -382,7 +382,10 @@ def create_lead(
         notes=payload.notes or "",
         status=payload.status or LeadStatus.new,
     )
-    db.add(lead)
+    from app.services.lead_ingestion import insert_lead_once
+    from app.routers.webhooks import sync_lead_to_google_sheets
+    lead, _ = insert_lead_once(db, lead)
+    sync_lead_to_google_sheets(db, lead, commit=False)
     db.commit()
     db.refresh(lead)
     return lead
@@ -433,7 +436,10 @@ def simulate_meta_lead(
         status=LeadStatus.new,
         notes="Simulated Meta Lead Ad form submission",
     )
-    db.add(lead)
+    from app.services.lead_ingestion import insert_lead_once
+    from app.routers.webhooks import sync_lead_to_google_sheets
+    lead, _ = insert_lead_once(db, lead)
+    sync_lead_to_google_sheets(db, lead, commit=False)
     db.commit()
     db.refresh(lead)
     return lead
@@ -454,7 +460,8 @@ def export_leads_excel(
         "Campaign": l.campaign_name,
         "Status": l.status,
         "Notes": l.notes,
-        "Created At": l.created_at,
+        "Created At": local_datetime(l.created_at, current_user.organization.timezone).isoformat(sep=' ', timespec='seconds'),
+        "Timezone": current_user.organization.timezone,
     } for l in leads]
 
     df = pd.DataFrame(rows)
@@ -508,6 +515,8 @@ def update_lead_status(
     if update.notes is not None:
         lead.notes = update.notes
 
+    from app.routers.webhooks import sync_lead_to_google_sheets
+    sync_lead_to_google_sheets(db, lead, commit=False, refresh=True)
     db.commit()
     db.refresh(lead)
     return lead
@@ -569,6 +578,8 @@ async def whatsapp_send(
     if lead.status == LeadStatus.new:
         lead.status = LeadStatus.contacted
 
+    from app.routers.webhooks import sync_lead_to_google_sheets
+    sync_lead_to_google_sheets(db, lead, commit=False, refresh=True)
     db.commit()
     db.refresh(msg_record)
 

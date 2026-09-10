@@ -1,11 +1,13 @@
 """Database-backed retries; leased claims allow multiple application workers."""
 import asyncio
 import logging
+import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import or_, and_
 from sqlalchemy.exc import IntegrityError
 from app.database import SessionLocal
-from app.models import IntegrationJob, Lead, GoogleSheetConnection, MetaPageConnection
+from app.models import IntegrationJob, Lead, GoogleSheetConnection, MetaPageConnection, SheetDeliveryLock
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +27,31 @@ def enqueue(db, org_id, kind, key, payload):
         pass  # A concurrent delivery already queued this event.
 
 
+def enqueue_sheet(db, connection, lead, *, refresh=False):
+    suffix = ':' + uuid.uuid4().hex if refresh else ''
+    enqueue(db, lead.org_id, 'sheets', f'sheets:{connection.id}:{lead.id}{suffix}',
+            {'connection_id': connection.id, 'lead_id': lead.id})
+
+
+def acquire_sheet_lock(db, connection):
+    destination = hashlib.sha256(f'{connection.spreadsheet_id}\n{connection.sheet_name}'.encode()).hexdigest()
+    token = uuid.uuid4().hex
+    if not db.get(SheetDeliveryLock, destination):
+        try:
+            with db.begin_nested():
+                db.add(SheetDeliveryLock(destination=destination, expires_at=now()))
+                db.flush()
+        except IntegrityError:
+            pass
+    claimed = db.query(SheetDeliveryLock).filter(
+        SheetDeliveryLock.destination == destination, SheetDeliveryLock.expires_at <= now()
+    ).update({'token': token, 'expires_at': now() + timedelta(minutes=10)}, synchronize_session=False)
+    db.commit()
+    return (destination, token) if claimed else None
+
+
 async def process_one():
-    from app.routers.webhooks import process_meta_body, _sync_to_google_sheet
+    from app.routers.webhooks import process_meta_body, _sync_to_google_sheet, sheet_matches_lead, SheetLayoutError
     with SessionLocal() as db:
         eligible = and_(IntegrationJob.status.in_(['pending', 'processing']), IntegrationJob.next_attempt_at <= now())
         job = db.query(IntegrationJob).filter(eligible).order_by(IntegrationJob.id).first()
@@ -40,6 +65,7 @@ async def process_one():
         if not claimed:
             return True
         db.refresh(job)
+        sheet_lock = None
         try:
             if job.kind == 'meta':
                 page_id = str(job.payload['entry'][0]['id'])
@@ -52,16 +78,38 @@ async def process_one():
                 lead = db.query(Lead).filter(Lead.id == job.payload['lead_id'], Lead.org_id == job.org_id).first()
                 if not connection or not lead:
                     raise RuntimeError('Lead or Google Sheets connection no longer available')
+                if not sheet_matches_lead(connection, lead):
+                    job.status, job.last_error = 'completed', None
+                    db.commit()
+                    return True
+                sheet_lock = acquire_sheet_lock(db, connection)
+                if not sheet_lock:
+                    job.status = 'pending'
+                    job.attempts -= 1
+                    job.next_attempt_at = now() + timedelta(seconds=10)
+                    db.commit()
+                    return True
+                # Resolve ORM relationships on this thread before calling Google.
+                _ = lead.organization, lead.owner
+                if lead.campaign:
+                    _ = lead.campaign.assigned_user
                 await asyncio.to_thread(_sync_to_google_sheet, connection.spreadsheet_id, connection.sheet_name, lead)
             job.status, job.last_error = 'completed', None
-        except Exception:
+        except Exception as exc:
             db.rollback()
             job = db.get(IntegrationJob, job.id)
             job.status = 'failed' if job.attempts >= 5 else 'pending'
             # Never persist external exception strings: request URLs may contain access tokens.
             job.last_error = ('Meta sync failed. Check page connection and permissions.' if job.kind == 'meta' else 'Sheets sync failed. Check credentials, sharing and worksheet name.')
+            if isinstance(exc, SheetLayoutError):
+                job.status, job.last_error = 'failed', str(exc)
             job.next_attempt_at = now() + timedelta(seconds=min(3600, 30 * 2 ** job.attempts))
             logger.warning('Integration job %s failed on attempt %s', job.id, job.attempts)
+        finally:
+            if sheet_lock:
+                destination, token = sheet_lock
+                db.query(SheetDeliveryLock).filter(SheetDeliveryLock.destination == destination,
+                    SheetDeliveryLock.token == token).update({'expires_at': now(), 'token': None}, synchronize_session=False)
         db.commit()
         return True
 

@@ -6,18 +6,15 @@ function resetWorkflow() {
   for (const id of ['workflowSummary', 'workflowAnalytics', 'followUpPages', 'integrationJobs', 'leadActivities']) document.getElementById(id).textContent = '';
   document.getElementById('followUpList').textContent = 'Sign in to see your follow-ups.';
 }
-function utcDate(value) {
-  if (!value) return null;
-  return new Date(/[zZ]$|[+-]\d\d:\d\d$/.test(value) ? value : value + 'Z');
-}
+
 
 async function loadWorkflow() {
   if (!state.token) return;
   const request = ++workflowRequest;
-  const tomorrow = new Date(); tomorrow.setHours(24, 0, 0, 0);
+
   try {
     const [queue, metrics] = await Promise.all([
-      api(`/workflow/follow-ups?before=${encodeURIComponent(tomorrow.toISOString())}&offset=${followUpOffset}`),
+      api(`/workflow/follow-ups?offset=${followUpOffset}`),
       api('/workflow/analytics'),
     ]);
     if (!queue || !metrics || request !== workflowRequest || !state.token) return;
@@ -29,7 +26,7 @@ async function loadWorkflow() {
       <div class="workflow-panel"><span>Average first response</span><strong>${metrics.average_response_hours === null ? 'No data yet' : metrics.average_response_hours + ' hours'}</strong><small>${metrics.response_samples} recorded contacts</small></div>`;
     document.getElementById('followUpList').innerHTML = queue.items.length ? queue.items.map(l => {
       const due = utcDate(l.follow_up_at);
-      return `<article class="follow-up-card"><div><span class="pill ${due < new Date() ? 'lost' : 'contacted'}">${due < new Date() ? 'Overdue' : 'Today'}</span><h3>${esc(l.name || 'Unnamed lead')}</h3><p>${esc(l.campaign_name || 'No campaign')} · ${esc(l.owner_name || 'Campaign assignment')}</p><time>${esc(due.toLocaleString())}</time></div><button class="btn btn-primary" onclick="openWorkflowLead(${l.id})">Open lead</button></article>`;
+      return `<article class="follow-up-card"><div><span class="pill ${due < new Date() ? 'lost' : 'contacted'}">${due < new Date() ? 'Overdue' : 'Today'}</span><h3>${esc(l.name || 'Unnamed lead')}</h3><p>${esc(l.campaign_name || 'No campaign')} · ${esc(l.owner_name || 'Campaign assignment')}</p><time>${esc(regionFormat(due))}</time></div><button class="btn btn-primary" onclick="openWorkflowLead(${l.id})">Open lead</button></article>`;
     }).join('') : '<div class="workflow-panel"><h3>You’re up to date</h3><p>No open follow-ups due by tonight. Schedule a next action from any lead’s details.</p></div>';
     document.getElementById('followUpPages').innerHTML = `<button class="btn btn-ghost" ${followUpOffset === 0 ? 'disabled' : ''} onclick="pageFollowUps(-50)">Previous</button><span>${queue.total ? followUpOffset + 1 : 0}–${Math.min(followUpOffset + 50, queue.total)} of ${queue.total}</span><button class="btn btn-ghost" ${followUpOffset + 50 >= queue.total ? 'disabled' : ''} onclick="pageFollowUps(50)">Next</button>`;
     const table = (title, rows) => `<h4>${title}</h4><div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Leads</th><th>Converted</th><th>Conversion</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${r.total}</td><td>${r.converted}</td><td>${r.conversion_rate}%</td></tr>`).join('') || '<tr><td colspan="4">No leads yet</td></tr>'}</tbody></table></div>`;
@@ -50,13 +47,13 @@ async function loadLeadActivities(id) {
   try {
     const rows = await api(`/workflow/leads/${id}/activities`);
     if (state.activeLead?.id !== id || !rows) return;
-    box.innerHTML = rows.map(a => `<article><strong>${esc(a.actor_name)} · ${esc(a.kind.replaceAll('_', ' '))}</strong><p>${esc(a.detail)}</p><time>${esc(utcDate(a.created_at).toLocaleString())}</time></article>`).join('') || '<p class="hint">No recorded activity yet.</p>';
+    box.innerHTML = rows.map(a => `<article><strong>${esc(a.actor_name)} · ${esc(a.kind.replaceAll('_', ' '))}</strong><p>${esc(a.detail)}</p><time>${esc(regionFormat(a.created_at))}</time></article>`).join('') || '<p class="hint">No recorded activity yet.</p>';
   } catch (err) { if (state.activeLead?.id === id) box.textContent = 'Could not load history.'; }
 }
 async function loadLeadWorkflow(lead) {
   const input = document.getElementById('followUpAt');
   const due = utcDate(lead.follow_up_at);
-  input.value = due ? new Date(due.getTime() - due.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+  input.value = due ? regionInput(due) : '';
   document.getElementById('activityDetail').value = '';
   const select = document.getElementById('leadOwner');
   select.innerHTML = `<option value="${lead.owner_id || ''}">${esc(lead.owner_name || 'Campaign assignment')}</option>`;
@@ -80,7 +77,7 @@ document.getElementById('saveFollowUp').addEventListener('click', async function
   this.disabled = true;
   try {
     const value = document.getElementById('followUpAt').value;
-    const payload = {follow_up_at: value ? new Date(value).toISOString() : null};
+    const payload = {follow_up_local: value || null};
     const owner = document.getElementById('leadOwner');
     if (state.user?.role === 'admin' && !owner.disabled && (Number(owner.value) || null) !== lead.owner_id) payload.owner_id = Number(owner.value) || null;
     const updated = await api(`/workflow/leads/${lead.id}`, {method: 'PATCH', body: JSON.stringify(payload)});

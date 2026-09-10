@@ -28,6 +28,7 @@ class Organization(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     slug = Column(String(100), unique=True, index=True, nullable=False)
+    timezone = Column(String(100), nullable=False, default='Asia/Kolkata', server_default='Asia/Kolkata')
     whatsapp_phone_number_id = Column(String(255), nullable=True)
     whatsapp_access_token = Column(String(512), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -84,6 +85,7 @@ class GoogleSheetConnection(Base):
     spreadsheet_url = Column(String(512), nullable=False)
     spreadsheet_id = Column(String(255), nullable=False)
     sheet_name = Column(String(255), default="Sheet1")
+    form_id = Column(String(255), nullable=True)
     status = Column(String(50), default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -208,3 +210,10 @@ class IntegrationJob(Base):
     last_error = Column(Text, nullable=True)
     next_attempt_at = Column(DateTime, server_default=func.now(), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class SheetDeliveryLock(Base):
+    __tablename__ = 'sheet_delivery_locks'
+    destination = Column(String(64), primary_key=True)
+    token = Column(String(64), nullable=True)
+    expires_at = Column(DateTime, nullable=False)

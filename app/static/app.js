@@ -18,6 +18,7 @@ window.addEventListener('unhandledrejection', function(event) {
 
 // ─── State ───────────────────────────────────────────────────────
 const state = {
+  timezone: 'Asia/Kolkata',
   token: localStorage.getItem('crm_token'),
   user: JSON.parse(localStorage.getItem('crm_user') || 'null'),
   leads: [],
@@ -87,6 +88,7 @@ function doLogout() {
   state.token = null;
   state.user  = null;
   state.leads = []; state.campaigns = []; state.staff = [];
+  state.timezone = 'Asia/Kolkata';
   closeDrawer();
   renderKanban([]); renderTable([], 0);
   localStorage.removeItem('crm_token');
@@ -278,7 +280,7 @@ function toISODate(d) {
 function setLeadDateChip(chip) {
   state.activeChip = chip;
   state.currentPage = 0;
-  const today = new Date();
+  const today = new Date(regionDay() + 'T12:00:00');
   const todayStr = toISODate(today);
 
   // Update chip active styles
@@ -420,7 +422,7 @@ function renderKanban(leads) {
     groups[s].forEach(lead => {
       const card = document.createElement('div');
       card.className = 'lead-card';
-      const date = lead.created_at ? new Date(lead.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }) : '—';
+      const date = regionFormat(lead.created_at, { day:'numeric', month:'short' });
       card.innerHTML = `
         <div class="lead-card-name">${esc(lead.name || '—')}</div>
         <div class="lead-card-contact">
@@ -497,10 +499,10 @@ function renderTable(leads, total) {
   
   tbody.innerHTML = leads.map(l => {
     try {
-      const dt = l.created_at ? new Date(l.created_at) : null;
+      const dt = utcDate(l.created_at);
       const isValidDt = dt && !isNaN(dt.getTime());
-      const dateStr = isValidDt ? dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
-      const timeStr = isValidDt ? dt.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12: true }) : '';
+      const dateStr = isValidDt ? regionFormat(dt, { day:'2-digit', month:'short', year:'numeric' }) : '—';
+      const timeStr = isValidDt ? regionFormat(dt, { hour:'2-digit', minute:'2-digit', hour12: true }) : '';
       const campaign = state.campaigns.find(c => c.id === l.campaign_id);
       const assignee = l.owner_name || campaign?.assigned_user_name || '—';
       const formName = l.form_name || '—';
@@ -598,7 +600,7 @@ function openLeadDrawer(lead) {
   state.activeLead = lead;
   loadLeadWorkflow(lead);
   document.getElementById('drawerLeadName').textContent    = lead.name || '—';
-  document.getElementById('drawerLeadTime').textContent    = lead.created_at ? new Date(lead.created_at).toLocaleString() : '';
+  document.getElementById('drawerLeadTime').textContent = lead.created_at ? `${regionFormat(lead.created_at)} (${crmTimezone()})` : '';
   document.getElementById('drawerLeadEmail').textContent   = lead.email || '—';
   document.getElementById('drawerLeadPhone').textContent   = lead.phone || '—';
   document.getElementById('drawerLeadCampaign').textContent = lead.campaign_name || '—';
@@ -838,7 +840,7 @@ function renderCampaignsGrid() {
       <div class="campaign-sheet-item">
         <div class="campaign-sheet-name">
           <i data-lucide="file-spreadsheet"></i>
-          <span>${esc(s.sheet_name)}</span>
+          <span>${esc(s.sheet_name)} · ${s.form_id ? `Form ${esc(s.form_id)}` : 'All forms'}</span>
         </div>
         <a class="campaign-sheet-link" href="${esc(s.spreadsheet_url)}" target="_blank" rel="noopener">View</a>
       </div>
@@ -890,6 +892,7 @@ function renderCampaignsGrid() {
 window.openCampaignSheetModal = function(campaignId) {
   if (!state.token) return;
   populateCampaignDropdown('gsCampaignSelect', campaignId);
+  loadSheetForms();
   openModal('googleSheetsModal');
 };
 
@@ -1071,6 +1074,7 @@ async function loadIntegrations() {
               <div class="integration-icon"><i data-lucide="file-spreadsheet" style="color: #0F9D58;"></i></div>
               <div class="integration-info">
                 <h3>${esc(sc.campaign_name)} <span class="integration-status">Tab: ${esc(sc.sheet_name)}</span></h3>
+                <p>${sc.form_id ? `Form ID: ${esc(sc.form_id)}` : 'All forms'}</p>
                 <p>Syncing to <a href="${esc(sc.spreadsheet_url)}" target="_blank" style="color:var(--accent);text-decoration:underline;">Google Spreadsheet</a></p>
               </div>
             </div>
@@ -1110,9 +1114,35 @@ window.deleteGoogleSheetConn = async function(connId) {
 document.getElementById('btnConnectGoogleSheets')?.addEventListener('click', () => {
   if (!state.token) return;
   populateCampaignDropdown('gsCampaignSelect');
+  loadSheetForms();
   openModal('googleSheetsModal');
 });
 
+let sheetFormsRequest = 0;
+async function loadSheetForms() {
+  const request = ++sheetFormsRequest;
+  const select = document.getElementById('gsFormSelect');
+  const campaign = document.getElementById('gsCampaignSelect').value;
+  select.replaceChildren(new Option('Loading forms…', ''));
+  select.disabled = true;
+  const submit = document.querySelector('#googleSheetsForm button[type="submit"]');
+  submit.disabled = true;
+  try {
+    const [forms, config] = await Promise.all([
+      api('/integrations/google-sheets/forms' + (campaign ? `?campaign_id=${encodeURIComponent(campaign)}` : '')),
+      api('/integrations/google-sheets/config'),
+    ]);
+    if (request !== sheetFormsRequest || !forms) return;
+    document.getElementById('gsServiceAccount').textContent = config?.service_account_email || 'Not configured. Set GOOGLE_SHEETS_CREDENTIALS_FILE on the server before delivery can run.';
+    select.replaceChildren(new Option('All forms', ''), ...forms.map(form => new Option(`${form.name} (${form.id})`, form.id)));
+    select.disabled = false;
+    submit.disabled = false;
+  } catch (err) {
+    if (request === sheetFormsRequest) select.replaceChildren(new Option('Could not load forms — reopen to retry', ''));
+    toast(err.message, 'error');
+  }
+}
+document.getElementById('gsCampaignSelect')?.addEventListener('change', loadSheetForms);
 document.getElementById('closeGoogleSheetsModal')?.addEventListener('click', () => closeModal('googleSheetsModal'));
 document.getElementById('cancelGoogleSheets')?.addEventListener('click', () => closeModal('googleSheetsModal'));
 
@@ -1124,11 +1154,13 @@ document.getElementById('googleSheetsForm')?.addEventListener('submit', async (e
   const payload = {
     spreadsheet_url: document.getElementById('gsUrl').value,
     sheet_name: document.getElementById('gsSheetName').value || 'Sheet1',
-    campaign_id: campVal ? parseInt(campVal, 10) : null
+    campaign_id: campVal ? parseInt(campVal, 10) : null,
+    form_id: document.getElementById('gsFormSelect').value || null
   };
   try {
-    await api('/integrations/google-sheets/connect', { method: 'POST', body: JSON.stringify(payload) });
-    toast('Google Sheet Connected! Leads will now sync automatically.');
+    const result = await api('/integrations/google-sheets/connect', { method: 'POST', body: JSON.stringify(payload) });
+    if (!result) return;
+    toast(`Connected. ${result.queued_leads} leads queued; check Sync activity for delivery errors.`);
     closeModal('googleSheetsModal');
     loadIntegrations();
     loadCampaigns();
@@ -1162,17 +1194,15 @@ function renderCharts() {
     let start, end;
     if (dateRangeStr.includes(' to ')) {
       const parts = dateRangeStr.split(' to ');
-      start = new Date(parts[0]);
-      end = new Date(parts[1]);
+      start = parts[0];
+      end = parts[1];
     } else {
-      start = new Date(dateRangeStr);
-      end = new Date(dateRangeStr);
+      start = dateRangeStr;
+      end = dateRangeStr;
     }
-    start.setHours(0, 0, 0, 0);
-    end.setHours(23, 59, 59, 999);
 
     filteredLeads = state.leads.filter(l => {
-      const created = new Date(l.created_at);
+      const created = regionDay(l.created_at);
       return created >= start && created <= end;
     });
   }
@@ -1183,12 +1213,12 @@ function renderCharts() {
   // Group by Date for Time Series
   const dateMap = {};
   filteredLeads.forEach(l => {
-    const dateStr = new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dateStr = regionDay(l.created_at);
     dateMap[dateStr] = (dateMap[dateStr] || 0) + 1;
   });
   
   // Sort dates chronologically
-  const sortedDates = Object.keys(dateMap).sort((a, b) => new Date(a + ` ${new Date().getFullYear()}`) - new Date(b + ` ${new Date().getFullYear()}`));
+  const sortedDates = Object.keys(dateMap).sort();
   const timeData = sortedDates.map(d => dateMap[d]);
 
   const colors = { new:'#3b82f6', contacted:'#f59e0b', qualified:'#8b5cf6', converted:'#10b981', lost:'#ef4444' };
@@ -1309,6 +1339,8 @@ function copyText(elId) {
 async function loadAll() {
   updateUserUI();
   if (state.token) {
+    try { await loadRegionSettings(); }
+    catch (err) { toast('Could not load your timezone settings. Refresh to retry.', 'error'); return; }
     state.dateFrom = null;
     state.dateTo   = null;
     state.activeChip = 'all';

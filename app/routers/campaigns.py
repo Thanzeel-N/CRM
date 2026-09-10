@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Campaign, User, UserRole
+from app.models import Campaign, User, UserRole, Lead
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -30,6 +30,7 @@ class CampaignUpdate(BaseModel):
 
 
 class SheetConnectionOut(BaseModel):
+    form_id: Optional[str] = None
     id: int
     spreadsheet_url: str
     sheet_name: str
@@ -78,6 +79,7 @@ def _campaign_out(c: Campaign, db: Session) -> CampaignOut:
             id=s.id,
             spreadsheet_url=s.spreadsheet_url,
             sheet_name=s.sheet_name or "Sheet1",
+            form_id=s.form_id,
             status=s.status
         )
         for s in (c.google_sheets or [])
@@ -259,6 +261,12 @@ def update_campaign(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(campaign, field, value)
 
+    if 'assigned_user_id' in payload.model_fields_set:
+        from app.routers.webhooks import sync_lead_to_google_sheets
+        db.flush()
+        db.expire(campaign, ['assigned_user'])
+        for lead in db.query(Lead).filter(Lead.org_id == current_user.org_id, Lead.campaign_id == campaign.id, Lead.owner_id.is_(None)):
+            sync_lead_to_google_sheets(db, lead, commit=False, refresh=True)
     db.commit()
     db.refresh(campaign)
     return _campaign_out(campaign, db)

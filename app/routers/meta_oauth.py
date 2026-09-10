@@ -532,7 +532,7 @@ async def connect_page(
                 url_leads = f"{FB_API_BASE}/{form_id}/leads"
                 params_leads = {
                     "access_token": page_access_token,
-                    "fields": "id,created_time,field_data,campaign_name,form_id"
+                    "fields": "id,created_time,field_data,campaign_id,campaign_name,form_id"
                 }
                 
                 try:
@@ -583,7 +583,7 @@ async def connect_page(
                                 phone=extract_field(fields, *PHONE_FIELD_NAMES),
                                 campaign_name=l.get("campaign_name"),
                                 form_name=resolved_form_name,
-                                raw_data=l,
+                                raw_data={**l, "form_id": target_form_id},
                                 created_at=created_at_val
                             )
                             from app.services.lead_ingestion import insert_lead_once
@@ -786,7 +786,7 @@ async def sync_facebook_leads(
                 url_leads = f"{FB_API_BASE}/{form_id}/leads"
                 params_leads = {
                     "access_token": page_access_token,
-                    "fields": "id,created_time,field_data,campaign_name,form_id",
+                    "fields": "id,created_time,field_data,campaign_id,campaign_name,form_id",
                     "limit": 100
                 }
                 
@@ -837,7 +837,7 @@ async def sync_facebook_leads(
                                 phone=extract_field(fields, *PHONE_FIELD_NAMES),
                                 campaign_name=l.get("campaign_name"),
                                 form_name=resolved_form_name,
-                                raw_data=l,
+                                raw_data={**l, "form_id": target_form_id},
                                 created_at=created_at_val
                             )
                             from app.services.lead_ingestion import insert_lead_once

@@ -16,6 +16,7 @@ function setup() {
     if (path === '/workflow/analytics') return {overdue: 1, average_response_hours: null, response_samples: 0, campaigns: [], agents: []};
     return {id: 1, follow_up_at: null};
   }});
+  vm.runInContext(fs.readFileSync('app/static/timezones.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('app/static/workflow.js', 'utf8'), context);
   return {context, document, calls};
 }
@@ -38,9 +39,18 @@ test('agent can save a follow-up without submitting an owner change', async () =
   const request = calls.find(c => c.options?.method === 'PATCH');
   const payload = JSON.parse(request.options.body);
   assert.equal(request.path, '/workflow/leads/1');
-  assert.equal(payload.follow_up_at, new Date('2026-09-10T10:00').toISOString());
+  assert.equal(payload.follow_up_local, '2026-09-10T10:00');
   assert.equal('owner_id' in payload, false);
   assert.equal(button.disabled, false);
+});
+
+test('Indian region dates and input values do not depend on the device timezone', () => {
+  const {context} = setup();
+  assert.equal(context.regionDay('2026-09-10T18:30:00'), '2026-09-11');
+  assert.equal(context.regionInput('2026-09-10T04:30:00Z'), '2026-09-10T10:00');
+  context.state.timezone = 'America/New_York';
+  assert.equal(context.regionInput('2026-07-01T14:00:00Z'), '2026-07-01T10:00');
+  assert.equal(context.regionInput('2026-01-01T14:00:00Z'), '2026-01-01T09:00');
 });
 
 test('logout invalidates pending dashboard results', async () => {

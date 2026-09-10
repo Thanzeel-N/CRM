@@ -37,6 +37,11 @@ def _verify_meta_signature(body: bytes, signature_header: str | None) -> bool:
 # Standard column order used for every Google Sheet connection.
 # Custom Meta form question names are added after these and before "CRM Marker".
 SHEET_STANDARD_HEADERS = ["Date", "Name", "Email", "Phone", "Campaign", "Form"]
+SHEET_WORKFLOW_HEADERS = ['Status', 'Owner', 'Notes', 'Follow-up', 'Timezone', 'Meta Lead ID', 'Form ID']
+
+
+class SheetLayoutError(ValueError):
+    """Safe, actionable layout errors that can be displayed in Sync activity."""
 
 
 def _authorized_client():
@@ -55,7 +60,6 @@ def _authorized_client():
 def _collect_custom_fields(leads: list) -> list:
     """Return unique Meta form-question/field names found across leads' raw_data."""
     custom = []
-    std_lower = {h.lower() for h in SHEET_STANDARD_HEADERS}
     # Phone/email/name variants fold into the standard columns, not extra columns.
     swallowed = set(PHONE_FIELD_NAMES) | set(EMAIL_FIELD_NAMES) | set(NAME_FIELD_NAMES)
     for lead in leads:
@@ -65,14 +69,15 @@ def _collect_custom_fields(leads: list) -> list:
             continue
         for field in field_data:
             name = (field.get("name") or "").strip()
-            if name and name.lower() not in std_lower and name.lower() not in swallowed and name not in custom:
-                custom.append(name)
+            header = 'Question: ' + name
+            if name and name.lower() not in swallowed and header not in custom:
+                custom.append(header)
     return custom
 
 
 def build_sheet_headers(leads: list) -> list:
     """Column headers for a sheet: standard columns + custom form fields + marker."""
-    return SHEET_STANDARD_HEADERS + _collect_custom_fields(leads) + ["CRM Marker"]
+    return SHEET_STANDARD_HEADERS + SHEET_WORKFLOW_HEADERS + _collect_custom_fields(leads) + ["CRM Marker"]
 
 
 def _headers_for_lead(lead: Lead) -> list:
@@ -103,8 +108,26 @@ def _raw_field_value(lead: Lead, *names) -> str:
 def _lead_header_value(lead: Lead, header: str) -> str:
     """Map a header name to the lead's value for that column."""
     key = (header or "").strip().lower()
+    from app.services.timezones import local_datetime, DEFAULT_TIMEZONE
+    region = lead.organization.timezone if lead.organization else DEFAULT_TIMEZONE
+    if key == 'crm marker':
+        return f'crm:{lead.org_id}:{lead.id}'
+    if key == 'timezone':
+        return region
+    if key == 'meta lead id':
+        return lead.fb_lead_id
+    if key == 'form id':
+        return str((lead.raw_data or {}).get('form_id') or '')
+    if key == 'status':
+        return getattr(lead.status, 'value', lead.status) or ''
+    if key == 'owner':
+        return lead.owner_name or (lead.campaign.assigned_user.name if lead.campaign and lead.campaign.assigned_user else '')
+    if key == 'notes':
+        return lead.notes or ''
+    if key == 'follow-up':
+        return local_datetime(lead.follow_up_at, region).isoformat(sep=' ', timespec='seconds') if lead.follow_up_at else ''
     if key == "date":
-        return lead.created_at.strftime("%Y-%m-%d %H:%M:%S") if lead.created_at else ""
+        return local_datetime(lead.created_at, region).isoformat(sep=' ', timespec='seconds') if lead.created_at else ''
     if key == "name":
         return lead.name or _raw_field_value(lead, *NAME_FIELD_NAMES)
     if key == "email":
@@ -115,6 +138,8 @@ def _lead_header_value(lead: Lead, header: str) -> str:
         return lead.campaign_name or ""
     if key == "form":
         return lead.form_name or ""
+    if key.startswith('question: '):
+        key = key[len('question: '):]
     raw = lead.raw_data or {}
     field_data = raw.get("field_data") if isinstance(raw, dict) else None
     if isinstance(field_data, list):
@@ -122,21 +147,56 @@ def _lead_header_value(lead: Lead, header: str) -> str:
             if (field.get("name") or "").strip().lower() == key:
                 values = field.get("values") or []
                 if values:
-                    return str(values[0])
+                    return '; '.join(str(value) for value in values)
     return ""
 
 
 def populate_google_sheet(sheet_id: str, sheet_name: str, headers: list, leads: list) -> int:
-    """Clear the worksheet, write the header row, then write every lead aligned
-    to it, newest first (sorted by date descending)."""
+    """Compatibility helper: preserve the worksheet and upsert by CRM identity."""
     client = _authorized_client()
     worksheet = client.open_by_key(sheet_id).worksheet(sheet_name)
-    worksheet.clear()
-    ordered = sorted(leads, key=lambda l: str(l.created_at or ""), reverse=True)
-    rows = [headers] + [[_lead_header_value(lead, h) for h in headers] for lead in ordered]
-    if rows:
-        worksheet.update("A1", rows, value_input_option="USER_ENTERED")
-    return max(0, len(rows) - 1)
+    for lead in sorted(leads, key=lambda l: str(l.created_at or '')):
+        _upsert_sheet_lead(worksheet, lead)
+    return len(leads)
+
+
+def _upsert_sheet_lead(worksheet, lead):
+    """Append columns without moving existing cells; update only CRM-owned cells."""
+    values = worksheet.get_all_values()
+    headers = list(values[0]) if values else []
+    if values and any(any(row) for row in values[1:]):
+        if 'CRM Marker' not in headers:
+            raise SheetLayoutError('Worksheet has existing data without CRM IDs. Select a new empty tab to preserve it.')
+        marker_index = headers.index('CRM Marker')
+        if any(any(row) and (len(row) <= marker_index or not row[marker_index]) for row in values[1:]):
+            raise SheetLayoutError('Worksheet contains legacy rows without CRM IDs. Select a new empty tab; keep this tab for review.')
+    if len(headers) != len(set(headers)) or any(not h.strip() for h in headers):
+        raise SheetLayoutError('Worksheet headers must be non-empty and unique.')
+    required = build_sheet_headers([lead])
+    updated_headers = headers + [h for h in required if h not in headers]
+    if len(updated_headers) > worksheet.col_count:
+        worksheet.add_cols(len(updated_headers) - worksheet.col_count)
+    if updated_headers != headers:
+        worksheet.update(range_name='A1', values=[updated_headers], value_input_option='RAW')
+    headers = updated_headers
+    marker_index = headers.index('CRM Marker')
+    marker = _lead_header_value(lead, 'CRM Marker')
+    matches = [i + 1 for i, row in enumerate(values[1:], start=1)
+               if len(row) > marker_index and row[marker_index] == marker]
+    if len(matches) > 1:
+        raise SheetLayoutError('Multiple rows have the same CRM ID. Review these rows before retrying.')
+    if matches:
+        from gspread.utils import rowcol_to_a1
+        # Old unprefixed custom headers remain supported. Other user columns stay untouched.
+        custom = {h[len('Question: '):] for h in required if h.startswith('Question: ')}
+        owned = set(required) | custom
+        updates = [{'range': rowcol_to_a1(matches[0], i + 1),
+                    'values': [[_lead_header_value(lead, h)]]}
+                   for i, h in enumerate(headers) if h in owned]
+        worksheet.batch_update(updates, value_input_option='RAW')
+    else:
+        row = [_lead_header_value(lead, h) for h in headers]
+        worksheet.insert_row(row, index=2, value_input_option='RAW')
 
 
 def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
@@ -156,18 +216,10 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
     try:
         client = _authorized_client()
         worksheet = client.open_by_key(sheet_id).worksheet(sheet_name)
-        headers = _read_sheet_headers(worksheet)
-        if headers is None:
-            headers = _headers_for_lead(lead)
-            worksheet.clear()
-            worksheet.append_row(headers)
-        marker_col = headers.index("CRM Marker") + 1
-        marker = f'crm:{lead.org_id}:{lead.id}'
-        if marker_col and marker in worksheet.col_values(marker_col):
-            return
-        row = [_lead_header_value(lead, h) for h in headers]
-        worksheet.insert_row(row, index=2, value_input_option="USER_ENTERED")
+        _upsert_sheet_lead(worksheet, lead)
         logger.info("Synced lead '%s' to Google Sheet %s/%s", lead.name, sheet_id, sheet_name)
+    except SheetLayoutError:
+        raise
     except Exception:
         raise RuntimeError("Google Sheets sync failed; check credentials, sheet sharing and worksheet name") from None
 
@@ -292,18 +344,17 @@ async def process_meta_body(body, db):
             created_at_val = None
             if "created_time" in details:
                 try:
-                    created_at_val = dateutil.parser.parse(details["created_time"])
+                    from app.services.timezones import utc_naive
+                    created_at_val = utc_naive(dateutil.parser.parse(details["created_time"]))
                 except Exception:
                     logger.debug("Failed to parse created_time for leadgen_id=%s", leadgen_id)
 
             from app.models import Campaign
-            campaign = db.query(Campaign).filter(Campaign.org_id == org_id, Campaign.meta_form_id == form_id_str).first()
-            if not campaign and details.get('campaign_name'):
-                campaign = db.query(Campaign).filter(Campaign.org_id == org_id, Campaign.name == details['campaign_name']).first()
-                if not campaign:
-                    campaign = Campaign(org_id=org_id, name=details['campaign_name'], meta_form_id=form_id_str)
-                    db.add(campaign)
-                    db.flush()
+            meta_campaign_id = str(details.get('campaign_id') or '')
+            campaign = db.query(Campaign).filter(Campaign.org_id == org_id, Campaign.meta_campaign_id == meta_campaign_id).first() if meta_campaign_id else None
+            if not campaign and not meta_campaign_id:
+                candidates = db.query(Campaign).filter(Campaign.org_id == org_id, Campaign.meta_form_id == form_id_str).all()
+                campaign = candidates[0] if len(candidates) == 1 else None
             # Keep a link to the Meta ad campaign ID so we can later sync its live status.
             meta_campaign_id = str(details.get('campaign_id')) if details.get('campaign_id') else None
             if campaign and meta_campaign_id and campaign.meta_campaign_id is None:
@@ -333,7 +384,13 @@ async def process_meta_body(body, db):
     return {"status": "ok"}
 
 
-def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: BackgroundTasks = None, *, commit=True):
+def sheet_matches_lead(connection, lead):
+    if connection.form_id and str((lead.raw_data or {}).get('form_id') or '') != connection.form_id:
+        return False
+    return connection.campaign_id is None or connection.campaign_id == lead.campaign_id
+
+
+def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: BackgroundTasks = None, *, commit=True, refresh=False):
     """Find all matching Google Sheets for this lead's campaign / org and append rows."""
     conns = db.query(GoogleSheetConnection).filter(
         GoogleSheetConnection.org_id == lead.org_id,
@@ -341,17 +398,9 @@ def sync_lead_to_google_sheets(db: Session, lead: Lead, background_tasks: Backgr
     ).all()
 
     for gs_conn in conns:
-        matches = False
-        if gs_conn.campaign_id is None:
-            matches = True
-        elif lead.campaign_id and gs_conn.campaign_id == lead.campaign_id:
-            matches = True
-        elif lead.campaign_name and gs_conn.campaign and gs_conn.campaign.name.strip().lower() == lead.campaign_name.strip().lower():
-            matches = True
-
-        if matches:
-            from app.services.integration_queue import enqueue
-            enqueue(db, lead.org_id, 'sheets', f'sheets:{gs_conn.id}:{lead.id}', {'connection_id': gs_conn.id, 'lead_id': lead.id})
+        if sheet_matches_lead(gs_conn, lead):
+            from app.services.integration_queue import enqueue_sheet
+            enqueue_sheet(db, gs_conn, lead, refresh=refresh)
     if commit:
         db.commit()
 

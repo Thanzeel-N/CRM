@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, AwareDatetime
+from pydantic import BaseModel, Field, AwareDatetime, NaiveDatetime
+from zoneinfo import ZoneInfo
+from dateutil.tz import datetime_exists, datetime_ambiguous
+from app.services.timezones import day_bounds, utc_naive
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Lead, LeadActivity, User, UserRole, Campaign, LeadStatus, IntegrationJob
@@ -15,6 +18,7 @@ router = APIRouter(tags=['workflow'])
 class WorkflowUpdate(BaseModel):
     owner_id: Optional[int] = None
     follow_up_at: Optional[AwareDatetime] = None
+    follow_up_local: Optional[NaiveDatetime] = None
 
 
 class ActivityCreate(BaseModel):
@@ -45,6 +49,16 @@ def owners(db: Session = Depends(get_db), user: User = Depends(get_current_user)
 def update_workflow(lead_id: int, payload: WorkflowUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     lead = visible_lead(db, user, lead_id)
     values = payload.model_dump(exclude_unset=True)
+    if 'follow_up_local' in values and 'follow_up_at' in values:
+        raise HTTPException(400, 'Submit either local time or an explicit UTC/offset time')
+    if 'follow_up_local' in values:
+        due = payload.follow_up_local
+        if due:
+            due = due.replace(tzinfo=ZoneInfo(user.organization.timezone))
+            if not datetime_exists(due) or datetime_ambiguous(due):
+                raise HTTPException(400, 'This time is skipped or repeated by daylight saving. Choose another time or submit an explicit offset.')
+        payload.follow_up_at = due
+        values['follow_up_at'] = due
     if 'owner_id' in values:
         if user.role != UserRole.admin:
             raise HTTPException(403, 'Only admins can assign lead owners')
@@ -61,6 +75,8 @@ def update_workflow(lead_id: int, payload: WorkflowUpdate, db: Session = Depends
         if lead.follow_up_at != due:
             activity(db, lead, user, 'follow_up', f'Follow-up scheduled for {due.isoformat()}Z' if due else 'Follow-up cleared')
             lead.follow_up_at = due
+    from app.routers.webhooks import sync_lead_to_google_sheets
+    sync_lead_to_google_sheets(db, lead, commit=False, refresh=True)
     db.commit()
     db.refresh(lead)
     return lead
@@ -82,12 +98,18 @@ def add_activity(lead_id: int, payload: ActivityCreate, db: Session = Depends(ge
         lead.follow_up_at = None
     if payload.kind == 'call' and lead.first_contacted_at is None:
         lead.first_contacted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    from app.routers.webhooks import sync_lead_to_google_sheets
+    sync_lead_to_google_sheets(db, lead, commit=False, refresh=True)
     db.commit()
     return {'status': 'saved'}
 
 
 @router.get('/workflow/follow-ups')
-def follow_ups(before: AwareDatetime, offset: int = Query(0, ge=0), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def follow_ups(before: Optional[AwareDatetime] = None, offset: int = Query(0, ge=0), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if before is None:
+        region = user.organization.timezone
+        _, end = day_bounds(datetime.now(ZoneInfo(region)).date(), region)
+        before = end.replace(tzinfo=timezone.utc)
     query = _base_lead_query(db, user).filter(Lead.follow_up_at < before.astimezone(timezone.utc).replace(tzinfo=None), Lead.status.notin_([LeadStatus.converted, LeadStatus.lost]))
     return {'total': query.count(), 'items': [LeadOut.model_validate(l) for l in query.order_by(Lead.follow_up_at, Lead.id).offset(offset).limit(50).all()]}
 

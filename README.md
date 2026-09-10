@@ -115,7 +115,17 @@ Before starting the updated application, run `alembic upgrade head` once against
 
 The application runs the retry worker through its ASGI lifespan. Keep lifespan enabled and at least one application process running. Pending jobs survive restarts; abandoned processing jobs become eligible after their ten-minute lease. The worker polls every ten seconds and retries after increasing delays; admins can retry failed jobs in **Lead Sources → Sync activity**.
 
-Google Sheets rows retain the six existing fields and add a CRM delivery identifier in column G. Reserve that column for these identifiers: retries check it before appending to avoid repeat rows after an uncertain API response. Keep identifiers intact. As with append-based external APIs, simultaneous deliveries to the same worksheet are not an exactly-once guarantee.
+Google Sheets rows retain the six existing fields and include a **CRM Marker** column. Keep this column and its values intact; its position is determined by the header, not a fixed column letter. Deliveries update the row with the matching marker, including status, owner, notes and follow-up changes. New form questions add columns without moving existing answers. Values are written as literal text so phone numbers and answers are preserved. A database lease serializes deliveries to each spreadsheet/tab across workers; retries after uncertain responses reuse the same row. Manual concurrent changes to worksheet structure or deliveries that outlive the ten-minute lease still require care.
+
+### Forms and regional timezones
+
+Revision `b424_sheets_timezone` adds form filters, worksheet delivery locks and an organization timezone. Install the updated requirements (including `tzdata`), back up the database, run `alembic upgrade head`, and restart the application. For a local SQLite database inside this checkout, `python scripts/upgrade_local_database.py` creates a backup before migrating.
+
+In **Lead Sources → Region and timezone**, India (`Asia/Kolkata`, IST) is the default. Select another IANA region or use **Use my device’s region**, then save. The saved organization setting applies to every staff member, lead date filters, Today counts, follow-ups, charts, Excel and Google Sheets. Database timestamps remain UTC. Daylight-saving regions use their regional rules; skipped or ambiguous follow-up times require another time or an explicit offset through the API. Changing the timezone queues updates for connected sheet rows.
+
+To split one campaign's forms, create separate empty tabs, then choose **Connect Google Sheet → Target Campaign → Lead form → Worksheet / Tab Name**. Connect each form to its tab. Choose **All forms** for a combined campaign tab; the Form/Form ID columns distinguish submissions and custom question columns expand as needed. The same destination cannot be configured with a conflicting campaign/form rule. Connections and reconnects queue historical leads through the same retry worker rather than clearing the worksheet. Check **Sync activity** for delivery results and errors; a saved connection does not mean Google has accepted its rows yet.
+
+Old exports with blank/missing CRM markers cannot be matched reliably to source submissions. Sync preserves those tabs and reports an actionable error instead of clearing them or appending duplicates. Keep the old tab for review and connect a new empty tab to produce a clean export from the CRM. Existing duplicates in external Sheets are not silently deleted. Different Meta lead IDs remain separate enquiries even when phone/email match.
 
 Meta lead fetch failures now remain failures rather than generating sample contact data. Unknown or ambiguously connected Facebook pages are ignored. The webhook tester is restricted to admins.
 
