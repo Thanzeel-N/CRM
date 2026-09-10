@@ -127,18 +127,21 @@ def _lead_header_value(lead: Lead, header: str) -> str:
 
 
 def populate_google_sheet(sheet_id: str, sheet_name: str, headers: list, leads: list) -> int:
-    """Clear the worksheet, write the header row, then write every lead aligned to it."""
+    """Clear the worksheet, write the header row, then write every lead aligned
+    to it, newest first (sorted by date descending)."""
     client = _authorized_client()
     worksheet = client.open_by_key(sheet_id).worksheet(sheet_name)
     worksheet.clear()
-    rows = [headers] + [[_lead_header_value(lead, h) for h in headers] for lead in leads]
+    ordered = sorted(leads, key=lambda l: str(l.created_at or ""), reverse=True)
+    rows = [headers] + [[_lead_header_value(lead, h) for h in headers] for lead in ordered]
     if rows:
         worksheet.update("A1", rows, value_input_option="USER_ENTERED")
     return max(0, len(rows) - 1)
 
 
 def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
-    """Append a new lead row to the connected Google Sheet, aligned to its headers.
+    """Insert a new lead row at the top of the connected Google Sheet (below the
+    header row) so the newest lead is always on top.
 
     Requires GOOGLE_SHEETS_CREDENTIALS_FILE to point to a valid service-account
     JSON key file downloaded from the Google Cloud Console.
@@ -163,7 +166,7 @@ def _sync_to_google_sheet(sheet_id: str, sheet_name: str, lead: Lead) -> None:
         if marker_col and marker in worksheet.col_values(marker_col):
             return
         row = [_lead_header_value(lead, h) for h in headers]
-        worksheet.append_row(row)
+        worksheet.insert_row(row, index=2, value_input_option="USER_ENTERED")
         logger.info("Synced lead '%s' to Google Sheet %s/%s", lead.name, sheet_id, sheet_name)
     except Exception:
         raise RuntimeError("Google Sheets sync failed; check credentials, sheet sharing and worksheet name") from None
