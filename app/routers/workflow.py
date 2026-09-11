@@ -140,11 +140,15 @@ def analytics(db: Session = Depends(get_db), user: User = Depends(get_current_us
 
 
 @router.get('/workflow/integration-jobs')
-def jobs(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def jobs(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100), paginated: bool = False,
+         db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role != UserRole.admin:
         raise HTTPException(403, 'Admin access required')
-    rows = db.query(IntegrationJob).filter(IntegrationJob.org_id == user.org_id, IntegrationJob.status != 'completed').order_by(IntegrationJob.id.desc()).limit(100).all()
-    return [{'id': j.id, 'kind': j.kind, 'status': j.status, 'attempts': j.attempts, 'last_error': j.last_error, 'next_attempt_at': j.next_attempt_at} for j in rows]
+    query = db.query(IntegrationJob).filter(IntegrationJob.org_id == user.org_id, IntegrationJob.status != 'completed')
+    total = query.count() if paginated else None
+    rows = query.order_by(IntegrationJob.id.desc()).offset(offset).limit(limit).all()
+    items = [{'id': j.id, 'kind': j.kind, 'status': j.status, 'attempts': j.attempts, 'last_error': j.last_error, 'next_attempt_at': j.next_attempt_at} for j in rows]
+    return {'items': items, 'total': total} if paginated else items
 
 
 @router.post('/workflow/integration-jobs/{job_id}/retry')

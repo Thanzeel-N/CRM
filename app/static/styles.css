@@ -1575,3 +1575,10 @@ button, a, input, select, textarea { touch-action: manipulation; }
   .page-title { overflow: hidden; }
   .page-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+.sync-activity > summary { cursor:pointer; font-weight:600; }
+.sync-activity > summary .hint { margin-left:12px; font-weight:400; }
+.sync-activity[open] > summary { margin-bottom:16px; }
+.sync-activity .follow-up-card { padding:12px; margin-bottom:8px; gap:12px; }
+.sync-activity .follow-up-card p { margin:6px 0 0; overflow-wrap:anywhere; }
+.sync-pages { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; }

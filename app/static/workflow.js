@@ -1,7 +1,12 @@
 let followUpOffset = 0;
 let workflowRequest = 0;
 let previousOverdue = null;
+let integrationOffset = 0;
+let integrationRequest = 0;
 function resetWorkflow() {
+  integrationOffset = 0; integrationRequest++;
+  document.getElementById('integrationJobCount').textContent = '';
+  document.querySelector('.sync-activity').open = false;
   workflowRequest++; followUpOffset = 0; previousOverdue = null;
   for (const id of ['workflowSummary', 'workflowAnalytics', 'followUpPages', 'integrationJobs', 'leadActivities']) document.getElementById(id).textContent = '';
   document.getElementById('followUpList').textContent = 'Sign in to see your follow-ups.';
@@ -114,11 +119,21 @@ async function toggleCampaignArchive(id, active) {
 async function loadIntegrationJobs() {
   if (state.user?.role !== 'admin') return;
   const box = document.getElementById('integrationJobs');
+  const request = ++integrationRequest;
   try {
-    const rows = await api('/workflow/integration-jobs'); if (!rows) return;
+    const result = await api(`/workflow/integration-jobs?paginated=true&offset=${integrationOffset}&limit=5`);
+    if (!result || request !== integrationRequest || !state.token) return;
+    if (integrationOffset >= result.total && integrationOffset > 0) {
+      integrationOffset = Math.max(0, Math.floor((result.total - 1) / 5) * 5);
+      return loadIntegrationJobs();
+    }
+    const rows = result.items;
+    document.getElementById('integrationJobCount').textContent = result.total ? `${result.total} outstanding` : 'Up to date';
     box.innerHTML = rows.map(j => `<article class="follow-up-card"><div><strong>${esc(j.kind === 'meta' ? 'Meta lead capture' : 'Google Sheets')} · ${esc(j.status)}</strong><p>${esc(j.last_error || 'Waiting for processing')} · ${j.attempts} attempts</p></div>${['pending','failed'].includes(j.status) ? `<button class="btn btn-secondary" onclick="retryIntegrationJob(${j.id}, this)">Retry now</button>` : ''}</article>`).join('') || '<p class="hint">No pending or failed deliveries.</p>';
-  } catch (err) { box.textContent = 'Unable to load sync activity.'; }
+    if (result.total > 5) box.innerHTML += `<nav class="sync-pages" aria-label="Sync activity pages"><button class="btn btn-ghost" ${integrationOffset === 0 ? 'disabled' : ''} onclick="pageIntegrationJobs(-5)">Previous</button><span>${integrationOffset + 1}&ndash;${Math.min(integrationOffset + 5, result.total)} of ${result.total}</span><button class="btn btn-ghost" ${integrationOffset + 5 >= result.total ? 'disabled' : ''} onclick="pageIntegrationJobs(5)">Next</button></nav>`;
+  } catch (err) { if (request === integrationRequest) box.textContent = 'Unable to load sync activity.'; }
 }
+function pageIntegrationJobs(delta) { integrationOffset = Math.max(0, integrationOffset + delta); loadIntegrationJobs(); }
 async function retryIntegrationJob(id, button) {
   button.disabled = true;
   try { await api(`/workflow/integration-jobs/${id}/retry`, {method:'POST'}); await loadIntegrationJobs(); }

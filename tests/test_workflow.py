@@ -146,6 +146,22 @@ async def test_sheets_failure_is_visible_and_can_recover(fixture):
     assert db.get(IntegrationJob, job.id).status == 'completed'
 
 
+def test_sync_activity_pagination_preserves_history_and_tenant_scope(fixture):
+    client, db, _ = fixture
+    for index in range(12):
+        db.add(IntegrationJob(org_id=1, job_key=f'page-{index}', kind='sheets', payload={}, status='failed'))
+    db.add(IntegrationJob(org_id=2, job_key='private-job', kind='sheets', payload={}, status='failed'))
+    db.add(IntegrationJob(org_id=1, job_key='done-job', kind='sheets', payload={}, status='completed'))
+    db.commit()
+    pages = [client.get(f'/workflow/integration-jobs?paginated=true&limit=5&offset={offset}').json() for offset in (0, 5, 10)]
+    assert [len(page['items']) for page in pages] == [5, 5, 2]
+    assert all(page['total'] == 12 for page in pages)
+    ids = [row['id'] for page in pages for row in page['items']]
+    assert len(set(ids)) == 12 and ids == sorted(ids, reverse=True)
+    assert client.get('/workflow/integration-jobs?offset=-1').status_code == 422
+    assert db.query(IntegrationJob).count() == 14
+
+
 def test_upgrade_existing_database_preserves_leads():
     engine = create_engine('sqlite://')
     with engine.begin() as connection:

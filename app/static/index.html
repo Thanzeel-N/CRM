@@ -336,7 +336,7 @@
 
       <!-- ── TAB: LEAD SOURCES ── -->
       <div id="tab-connect" class="tab-pane">
-        <div class="workflow-panel"><div class="section-head"><h3>Sync activity</h3><button class="btn btn-ghost" onclick="loadIntegrationJobs()">Refresh</button></div><p class="hint">Failed deliveries retry automatically up to five times.</p><div id="integrationJobs"></div></div>
+        <details class="workflow-panel sync-activity"><summary>Sync activity <span id="integrationJobCount" class="hint"></span></summary><div class="section-head"><p class="hint">Recent pending and failed deliveries. Review errors before retrying.</p><button class="btn btn-ghost" onclick="loadIntegrationJobs()">Refresh</button></div><div id="integrationJobs" aria-live="polite"></div></details>
         <div class="section-head">
           <h2>Lead Sources</h2>
         </div>
