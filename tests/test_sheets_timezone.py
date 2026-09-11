@@ -164,12 +164,11 @@ async def test_sheet_layout_failure_is_actionable_and_releases_lock(fixture):
     assert acquire_sheet_lock(db, db.get(GoogleSheetConnection, 1))
 
 
-def test_status_owner_followup_and_timezone_changes_queue_sheet_updates(fixture):
+def test_status_owner_followup_changes_queue_sheet_updates(fixture):
     client, db, _ = fixture
     assert client.patch('/leads/1/status', json={'status': 'qualified', 'notes': 'Interested'}).status_code == 200
     assert client.patch('/workflow/leads/1', json={'owner_id': 2, 'follow_up_local': '2026-09-12T10:00'}).status_code == 200
-    assert client.patch('/org/settings', json={'timezone': 'Asia/Dubai'}).status_code == 200
-    assert db.query(IntegrationJob).count() == 3
+    assert db.query(IntegrationJob).count() == 2
     assert db.get(Lead, 1).follow_up_at == datetime(2026, 9, 12, 4, 30)
 
 
@@ -184,19 +183,39 @@ def test_regional_date_filters_include_indian_midnight_boundary(fixture):
     assert day_bounds(date(2026, 9, 11))[0] == datetime(2026, 9, 10, 18, 30)
 
 
-def test_region_validation_permissions_and_dst(fixture):
+def test_all_leads_and_adjacent_ist_days_preserve_every_lead(fixture):
     client, db, _ = fixture
+    db.get(Lead, 1).created_at = datetime(2026, 9, 11, 0)
+    for index in range(76):
+        # 62 submissions on September 11 IST; 15 after midnight on September 12.
+        instant = datetime(2026, 9, 11, 12 if index < 61 else 20)
+        db.add(Lead(org_id=1, fb_lead_id=f'boundary-{index}', created_at=instant))
+    db.commit()
+    for legacy_zone in ('UTC', 'Asia/Kolkata', 'America/New_York'):
+        db.get(Organization, 1).timezone = legacy_zone
+        db.commit()
+        all_rows = client.get('/leads')
+        today = client.get('/leads?date_from=2026-09-11&date_to=2026-09-11').json()
+        tomorrow = client.get('/leads?date_from=2026-09-12&date_to=2026-09-12').json()
+        assert all_rows.headers['X-Total-Count'] == '77'
+        assert len(today) == 62 and len(tomorrow) == 15
+        assert {r['id'] for r in today + tomorrow} == {r['id'] for r in all_rows.json()}
+        assert client.get('/leads/stats').json()['total_leads'] == 77
+
+
+def test_fixed_india_timezone_ignores_legacy_settings(fixture):
+    client, db, _ = fixture
+    db.get(Organization, 1).timezone = 'America/New_York'
+    db.commit()
     assert client.get('/org/settings').json()['timezone'] == 'Asia/Kolkata'
     assert client.patch('/org/settings', json={'timezone': 'Fake/Zone'}).status_code == 422
-    assert client.patch('/org/settings', json={'timezone': 'America/New_York'}).status_code == 200
-    assert client.patch('/workflow/leads/1', json={'follow_up_local': '2026-03-08T02:30'}).status_code == 400
-    assert client.patch('/workflow/leads/1', json={'follow_up_local': '2026-11-01T01:30'}).status_code == 400
+    assert client.patch('/org/settings', json={'timezone': 'America/New_York'}).status_code == 422
     assert client.patch('/workflow/leads/1', json={'follow_up_local': '2026-07-01T10:00'}).status_code == 200
-    assert db.get(Lead, 1).follow_up_at == datetime(2026, 7, 1, 14)
+    assert db.get(Lead, 1).follow_up_at == datetime(2026, 7, 1, 4, 30)
     start, end = day_bounds(date(2026, 3, 8), 'America/New_York')
     assert (end - start).total_seconds() == 23 * 3600
     app.dependency_overrides[get_current_user] = lambda: db.get(User, 2)
-    assert client.patch('/org/settings', json={'timezone': 'UTC'}).status_code == 403
+    assert client.patch('/org/settings', json={'name': 'Changed'}).status_code == 403
     assert client.post('/integrations/google-sheets/connect', json={'spreadsheet_url': 'https://docs.google.com/spreadsheets/d/x'}).status_code == 403
 
 

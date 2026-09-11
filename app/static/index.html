@@ -163,7 +163,7 @@
 
       <!-- ── TAB: PIPELINE BOARD ── -->
       <div id="tab-today" class="tab-pane active">
-        <div class="section-head"><div><h2>Today’s follow-ups</h2><p class="hint">Due today and overdue. Times use <span class="timezone-label">Asia/Kolkata</span>.</p></div><button class="btn btn-secondary" onclick="loadWorkflow()">Refresh</button></div>
+        <div class="section-head"><div><h2>Today’s follow-ups</h2><p class="hint">Due today and overdue. Times use <span class="timezone-label">IST (UTC+5:30)</span>.</p></div><button class="btn btn-secondary" onclick="loadWorkflow()">Refresh</button></div>
         <div id="workflowSummary" class="workflow-summary"></div>
         <div id="followUpList" class="follow-up-list"><p class="hint">Sign in to see your follow-ups.</p></div>
         <div id="followUpPages" class="pagination-bar"></div>
@@ -336,13 +336,6 @@
 
       <!-- ── TAB: LEAD SOURCES ── -->
       <div id="tab-connect" class="tab-pane">
-        <form id="regionSettingsForm" class="workflow-panel">
-          <h3>Region and timezone</h3>
-          <p class="hint">Used for lead dates, Today, follow-ups and exports. Default: India (Asia/Kolkata).</p>
-          <label for="orgTimezone">Organization timezone</label>
-          <select id="orgTimezone" class="form-control"><option value="Asia/Kolkata">India — Asia/Kolkata (IST)</option></select>
-          <div class="modal-actions"><button type="button" class="btn btn-ghost" id="detectTimezone">Use my device’s region</button><button type="submit" class="btn btn-primary">Save timezone</button></div>
-        </form>
         <div class="workflow-panel"><div class="section-head"><h3>Sync activity</h3><button class="btn btn-ghost" onclick="loadIntegrationJobs()">Refresh</button></div><p class="hint">Failed deliveries retry automatically up to five times.</p><div id="integrationJobs"></div></div>
         <div class="section-head">
           <h2>Lead Sources</h2>
@@ -478,7 +471,7 @@
       <div class="detail-section">
         <p class="detail-label">Next action</p>
         <label for="leadOwner">Lead owner</label><select id="leadOwner" class="form-control"></select>
-        <label for="followUpAt">Follow-up date and time (<span class="timezone-label">Asia/Kolkata</span>)</label><input id="followUpAt" type="datetime-local" class="form-control">
+        <label for="followUpAt">Follow-up date and time (<span class="timezone-label">IST (UTC+5:30)</span>)</label><input id="followUpAt" type="datetime-local" class="form-control">
         <div class="workflow-actions"><button class="btn btn-primary" id="saveFollowUp">Save next action</button><button class="btn btn-ghost" id="completeFollowUp">Mark done</button><a id="callLead" class="btn btn-secondary">Call</a></div>
       </div>
       <div class="detail-section">

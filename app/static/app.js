@@ -18,7 +18,6 @@ window.addEventListener('unhandledrejection', function(event) {
 
 // ─── State ───────────────────────────────────────────────────────
 const state = {
-  timezone: 'Asia/Kolkata',
   token: localStorage.getItem('crm_token'),
   user: JSON.parse(localStorage.getItem('crm_user') || 'null'),
   leads: [],
@@ -88,7 +87,6 @@ function doLogout() {
   state.token = null;
   state.user  = null;
   state.leads = []; state.campaigns = []; state.staff = [];
-  state.timezone = 'Asia/Kolkata';
   closeDrawer();
   renderKanban([]); renderTable([], 0);
   localStorage.removeItem('crm_token');
@@ -1339,8 +1337,6 @@ function copyText(elId) {
 async function loadAll() {
   updateUserUI();
   if (state.token) {
-    try { await loadRegionSettings(); }
-    catch (err) { toast('Could not load your timezone settings. Refresh to retry.', 'error'); return; }
     state.dateFrom = null;
     state.dateTo   = null;
     state.activeChip = 'all';

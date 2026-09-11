@@ -1,6 +1,6 @@
 from typing import Optional, List
 from pydantic import BaseModel, field_validator
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
+from app.services.timezones import DEFAULT_TIMEZONE
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,11 @@ class OrgSettingsOut(BaseModel):
     timezone: str = 'Asia/Kolkata'
     whatsapp_phone_number_id: Optional[str] = None
     whatsapp_access_token: Optional[str] = None
+
+    @field_validator('timezone', mode='before')
+    @classmethod
+    def fixed_timezone(cls, value):
+        return DEFAULT_TIMEZONE
 
     @classmethod
     def from_orm_with_alias(cls, org):
@@ -44,17 +49,9 @@ class OrgSettingsUpdate(BaseModel):
     @field_validator('timezone')
     @classmethod
     def valid_timezone(cls, value):
-        if value is not None:
-            try:
-                ZoneInfo(value)
-            except (ZoneInfoNotFoundError, ValueError):
-                raise ValueError('Select a valid region timezone')
+        if value is not None and value != DEFAULT_TIMEZONE:
+            raise ValueError('CRM timezone is fixed to India Standard Time (Asia/Kolkata)')
         return value
-
-
-@router.get('/timezones')
-def timezones(current_user: User = Depends(get_current_user)):
-    return sorted(available_timezones())
 
 
 @router.get("/settings", response_model=OrgSettingsOut)
@@ -81,12 +78,6 @@ def update_org_settings(
         raise HTTPException(status_code=404, detail="Organization not found")
 
     if payload.name: org.name = payload.name
-    if payload.timezone is not None and payload.timezone != org.timezone:
-        org.timezone = payload.timezone
-        from app.models import Lead
-        from app.routers.webhooks import sync_lead_to_google_sheets
-        for lead in db.query(Lead).filter(Lead.org_id == org.id):
-            sync_lead_to_google_sheets(db, lead, commit=False, refresh=True)
     if payload.whatsapp_phone_number_id is not None: org.whatsapp_phone_number_id = payload.whatsapp_phone_number_id
     if payload.whatsapp_access_token is not None: org.whatsapp_access_token = payload.whatsapp_access_token
 

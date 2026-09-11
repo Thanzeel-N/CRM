@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, AwareDatetime, NaiveDatetime
 from zoneinfo import ZoneInfo
 from dateutil.tz import datetime_exists, datetime_ambiguous
-from app.services.timezones import day_bounds, utc_naive
+from app.services.timezones import day_bounds, utc_naive, DEFAULT_TIMEZONE
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Lead, LeadActivity, User, UserRole, Campaign, LeadStatus, IntegrationJob
@@ -54,7 +54,7 @@ def update_workflow(lead_id: int, payload: WorkflowUpdate, db: Session = Depends
     if 'follow_up_local' in values:
         due = payload.follow_up_local
         if due:
-            due = due.replace(tzinfo=ZoneInfo(user.organization.timezone))
+            due = due.replace(tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
             if not datetime_exists(due) or datetime_ambiguous(due):
                 raise HTTPException(400, 'This time is skipped or repeated by daylight saving. Choose another time or submit an explicit offset.')
         payload.follow_up_at = due
@@ -107,7 +107,7 @@ def add_activity(lead_id: int, payload: ActivityCreate, db: Session = Depends(ge
 @router.get('/workflow/follow-ups')
 def follow_ups(before: Optional[AwareDatetime] = None, offset: int = Query(0, ge=0), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if before is None:
-        region = user.organization.timezone
+        region = DEFAULT_TIMEZONE
         _, end = day_bounds(datetime.now(ZoneInfo(region)).date(), region)
         before = end.replace(tzinfo=timezone.utc)
     query = _base_lead_query(db, user).filter(Lead.follow_up_at < before.astimezone(timezone.utc).replace(tzinfo=None), Lead.status.notin_([LeadStatus.converted, LeadStatus.lost]))

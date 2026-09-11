@@ -4,7 +4,7 @@ import logging
 import random
 from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
-from app.services.timezones import day_bounds, local_datetime
+from app.services.timezones import day_bounds, local_datetime, DEFAULT_TIMEZONE
 from typing import Optional, List
 
 import pandas as pd
@@ -298,13 +298,13 @@ def list_leads(
         )
     if date_from:
         try:
-            start, _ = day_bounds(datetime.strptime(date_from, "%Y-%m-%d").date(), current_user.organization.timezone)
+            start, _ = day_bounds(datetime.strptime(date_from, "%Y-%m-%d").date(), DEFAULT_TIMEZONE)
             query = query.filter(Lead.created_at >= start)
         except ValueError:
             raise HTTPException(400, 'Invalid start date; use YYYY-MM-DD')
     if date_to:
         try:
-            _, end = day_bounds(datetime.strptime(date_to, "%Y-%m-%d").date(), current_user.organization.timezone)
+            _, end = day_bounds(datetime.strptime(date_to, "%Y-%m-%d").date(), DEFAULT_TIMEZONE)
             query = query.filter(Lead.created_at < end)
         except ValueError:
             raise HTTPException(400, 'Invalid end date; use YYYY-MM-DD')
@@ -338,7 +338,7 @@ def get_lead_stats(
 
     conversion_rate = round((converted_count / total * 100), 1) if total > 0 else 0.0
 
-    region = current_user.organization.timezone
+    region = DEFAULT_TIMEZONE
     start, end = day_bounds(datetime.now(ZoneInfo(region)).date(), region)
     new_today = base.filter(
         Lead.created_at >= start,
@@ -460,8 +460,8 @@ def export_leads_excel(
         "Campaign": l.campaign_name,
         "Status": l.status,
         "Notes": l.notes,
-        "Created At": local_datetime(l.created_at, current_user.organization.timezone).isoformat(sep=' ', timespec='seconds'),
-        "Timezone": current_user.organization.timezone,
+        "Created At": local_datetime(l.created_at, DEFAULT_TIMEZONE).isoformat(sep=' ', timespec='seconds'),
+        "Timezone": DEFAULT_TIMEZONE,
     } for l in leads]
 
     df = pd.DataFrame(rows)

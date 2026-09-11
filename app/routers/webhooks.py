@@ -109,7 +109,7 @@ def _lead_header_value(lead: Lead, header: str) -> str:
     """Map a header name to the lead's value for that column."""
     key = (header or "").strip().lower()
     from app.services.timezones import local_datetime, DEFAULT_TIMEZONE
-    region = lead.organization.timezone if lead.organization else DEFAULT_TIMEZONE
+    region = DEFAULT_TIMEZONE
     if key == 'crm marker':
         return f'crm:{lead.org_id}:{lead.id}'
     if key == 'timezone':
